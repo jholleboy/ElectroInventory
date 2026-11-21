@@ -43,6 +43,18 @@ namespace ElectroInventory
         }
     }
 
+    internal static class OverlayViewport
+    {
+        public static RectangleF Fit(Size viewport, Size design)
+        {
+            if (viewport.Width <= 0 || viewport.Height <= 0 || design.Width <= 0 || design.Height <= 0)
+                return RectangleF.Empty;
+            float scale = Math.Min(viewport.Width * .90f / design.Width, viewport.Height * .86f / design.Height);
+            float width = design.Width * scale, height = design.Height * scale;
+            return new RectangleF((viewport.Width - width) / 2, (viewport.Height - height) / 2, width, height);
+        }
+    }
+
     internal static class OverlayPointer
     {
         public static bool TryMap(float x, float y, RectangleF panel, Size logicalSize, out Point point)

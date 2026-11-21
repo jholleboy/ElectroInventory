@@ -51,6 +51,14 @@ namespace ElectroInventory
                     System.Globalization.CompareOptions.IgnoreNonSpace) >= 0).ToList();
         }
 
+        public static List<string> Categories(Snapshot snapshot, Navigation nav)
+        {
+            var categories = snapshot.Rows.Where(x => snapshot.Mode != 2 || x.Group == nav.Trade.Current)
+                .Select(x => x.Category).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+            categories.Insert(0, "");
+            return categories;
+        }
+
         public Bitmap Make(Snapshot snapshot, Navigation nav, bool demo, bool ownsInput, ActionSelection action, ActionResult result, bool busy)
         {
             var image = new Bitmap(Width, Height);
@@ -63,7 +71,7 @@ namespace ElectroInventory
                 Box(g, new Rectangle(0, 0, Width, Height), Color.FromArgb(9, 19, 31), Cyan);
                 Line(g, 25, 72, Width - 25, 72, Edge);
                 Text(g, "◇  ELECTROINVENTORY", 29, 20, 480, 33, 21, Cyan, true);
-                Text(g, demo ? "DADOS DEMONSTRATIVOS" : "RC2  /  " + (action.Offer == null ? "LEITURA" : "AÇÕES AUTORIZADAS"), 810, 25, 300, 32, 16, Pink, true);
+                Text(g, demo ? "DADOS DEMONSTRATIVOS" : "RC2  /  " + (action.Offer == null ? "LEITURA" : "AÇÕES AUTORIZADAS"),  750, 25, 292, 32, 16, Pink, true);
                 if (!passive)
                     Button(g, new Rectangle(1250, 20, 120, 38), "Esc  Fechar", () => CloseRequested = true);
                 Text(g, snapshot.Mode == 1 ? "ARMAZENAMENTO" : snapshot.Mode == 2 ? "COMÉRCIO" : "INVENTÁRIO",
@@ -77,9 +85,11 @@ namespace ElectroInventory
                     Text(g, "Saldo aplicável  $ " + Quantity(snapshot.Balance), 1004, 149, 355, 30, 19, Cyan, true);
 
                 if (snapshot.Mode == 2) DrawTradeTabs(g, snapshot, nav, ownsInput);
-                var categories = snapshot.Rows.Select(x => x.Category).Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Distinct().ToList();
-                categories.Insert(0, "");
+                var categories = Categories(snapshot, nav);
+                if (nav.CategoryOffset >= categories.Count) nav.CategoryOffset = 0;
+                if (snapshot.Mode != 0)
+                    Text(g, ownsInput ? "MOUSE E TECLADO" : "MODO PASSIVO · F10 FECHA",
+                        1045, 26, 205, 30, 14, ownsInput ? Cyan : Muted, true);
                 var active = Items(snapshot, nav, nav.Right);
                 int count = active.Count;
                 nav.Selected = Math.Max(0, Math.Min(nav.Selected, count - 1));
@@ -113,7 +123,7 @@ namespace ElectroInventory
                 Text(g, snapshot.Mode == 2
                     ? "F10 fecha  ·  Clique ou Ctrl+F2 Comprar/Vender  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela"
                     : passive ? "F10 fecha  ·  Ctrl+F6 troca lado  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F4 ação  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela" :
-                    "Setas/mouse  Navegar  ·  PgUp/PgDn/roda  Página  ·  /  Pesquisar  ·  Ctrl+F4  Ação  ·  Ctrl+F3  Confirmar  ·  I/Esc  Fechar",
+                    "Setas/mouse  Navegar  ·  PgUp/PgDn/roda  Página  ·  /  Pesquisar  ·  Home/End  Filtro  ·  Ctrl+F4  Ação  ·  Ctrl+F3  Confirmar  ·  I/Esc  Fechar",
                     28, 718, 1150, 27, 16, Muted, false);
                 if (snapshot.Incomplete) Text(g, "Lista parcial", 1230, 718, 145, 27, 16, Pink, true);
             }

@@ -202,15 +202,17 @@ namespace ElectroInventory
                     refresh = true;
                     // Discard hit targets rendered under the previous ownership state.
                     layout.Targets.Clear();
+                    layout.ActionRequested = false;
+                    selection.Confirming = false;
                 }
                 if (open)
                 {
                     Size size = Game.Resolution;
-                    RectangleF bounds = Fit(size);
+                    RectangleF bounds = OverlayViewport.Fit(size, new Size(InventoryView.Width, InventoryView.Height));
                     if (ownsInput)
                     {
                         if (nav.Search || !Game.IsKeyDownRightNow(Keys.LControlKey))
-                            refresh |= Navigate(nav, edges, toggle, togglePressed, escape);
+                            refresh |= Navigate(nav, sample, edges, toggle, togglePressed, escape);
                         // Frame-local controls expire automatically when the overlay closes.
                         foreach (int control in OverlayControls)
                             NativeFunction.Natives.DISABLE_CONTROL_ACTION(0, control, true);
@@ -315,7 +317,7 @@ namespace ElectroInventory
             return false;
         }
 
-        private static bool Navigate(Navigation nav, HashSet<Keys> edges, Keys toggle, bool togglePressed, bool escape)
+        private static bool Navigate(Navigation nav, Snapshot snapshot, HashSet<Keys> edges, Keys toggle, bool togglePressed, bool escape)
         {
             bool slash = Pressed(Keys.OemQuestion, edges);
             bool back = Pressed(Keys.Back, edges);
@@ -337,6 +339,17 @@ namespace ElectroInventory
                 return changed;
             }
             if (slash) { nav.Search = true; return true; }
+            bool previousCategory = Pressed(Keys.Home, edges);
+            bool nextCategory = Pressed(Keys.End, edges);
+            if (previousCategory || nextCategory)
+            {
+                var categories = InventoryView.Categories(snapshot, nav);
+                int index = categories.IndexOf(nav.Category);
+                index = (index + (nextCategory ? 1 : categories.Count - 1) + categories.Count) % categories.Count;
+                nav.Filter(categories[index]);
+                nav.CategoryOffset = index / 8 * 8;
+                return true;
+            }
             int delta = (Pressed(Keys.Right, edges) ? 1 : 0) - (Pressed(Keys.Left, edges) ? 1 : 0)
                 + (Pressed(Keys.Down, edges) ? 3 : 0) - (Pressed(Keys.Up, edges) ? 3 : 0)
                 + (Pressed(Keys.PageDown, edges) ? InventoryView.Page : 0) - (Pressed(Keys.PageUp, edges) ? InventoryView.Page : 0);
@@ -344,13 +357,6 @@ namespace ElectroInventory
             if (NativeFunction.Natives.IS_CONTROL_JUST_PRESSED<bool>(0, 242)) delta += InventoryView.Page;
             if (delta != 0) { nav.Selected = Math.Max(0, nav.Selected + delta); return true; }
             return false;
-        }
-
-        private static RectangleF Fit(Size size)
-        {
-            float scale = Math.Min(size.Width * .90f / InventoryView.Width, size.Height * .86f / InventoryView.Height);
-            float w = InventoryView.Width * scale, h = InventoryView.Height * scale;
-            return new RectangleF((size.Width - w) / 2, (size.Height - h) / 2, w, h);
         }
 
         private static void BlockMouseClick()
