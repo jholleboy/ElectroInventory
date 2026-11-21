@@ -36,6 +36,9 @@ namespace ElectroInventory
     {
         private static readonly object RenderLock = new object();
         private static readonly int[] OverlayControls = { 1, 2, 21, 22, 23, 24, 25, 30, 31, 37, 44, 75, 140, 141, 142, 237 };
+        // GTA frontend navigation, accept/back and cursor buttons, for both input groups.
+        private static readonly int[] ContextControls = { 172, 173, 174, 175, 176, 177,
+            187, 188, 189, 190, 191, 192, 201, 202, 203, 204, 205, 237, 238 };
         private static Texture texture, cursor;
         private static PointF? cursorPosition;
         private static RectangleF destination;
@@ -60,7 +63,7 @@ namespace ElectroInventory
                 using (var process = Process.GetCurrentProcess()) pid = process.Id;
                 using (IDataSource source = demo ? (IDataSource)new DemoDataSource() : new LsrReadOnlyDataSource(pid, log))
                 using (IDataSource unavailable = new UnavailableDataSource())
-                using (var actions = demo ? null : new ActionClient(pid))
+                using (var actions = demo ? null : new ActionClient(pid, config.Diagnostics))
                 using (var artwork = new ItemArtwork(config.ItemImages ? Path.Combine("Plugins", "ElectroInventory", "items") : null))
                     Run(source, unavailable, actions, artwork, config, demo, log);
             }
@@ -136,6 +139,13 @@ namespace ElectroInventory
                 {
                     open = false;
                     ReleaseTexture();
+                }
+                bool nativeTrade = sample?.Mode == 2 && actions?.NativeTradeOnly == true;
+                if (nativeTrade && (open || inspectPressed))
+                {
+                    if (open) { open = false; ReleaseTexture(); }
+                    Game.DisplayHelp("Esta negociação usa o menu original do Los Santos RED.");
+                    inspectPressed = false;
                 }
                 if (open && ownsInput && escape && selection.Confirming)
                 {
@@ -219,6 +229,12 @@ namespace ElectroInventory
                         foreach (int control in OverlayControls)
                             NativeFunction.Natives.DISABLE_CONTROL_ACTION(0, control, true);
                         BlockMouseClick();
+                        if (passive)
+                            foreach (int control in ContextControls)
+                            {
+                                NativeFunction.Natives.DISABLE_CONTROL_ACTION(0, control, true);
+                                NativeFunction.Natives.DISABLE_CONTROL_ACTION(2, control, true);
+                            }
                         NativeFunction.Natives.SET_MOUSE_CURSOR_THIS_FRAME();
                         bool click = NativeFunction.Natives.IS_DISABLED_CONTROL_PRESSED<bool>(0, 237);
                         float x = NativeFunction.Natives.GET_CONTROL_NORMAL<float>(0, 239) * size.Width;

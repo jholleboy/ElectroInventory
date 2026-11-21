@@ -1,9 +1,9 @@
 diff --git a/Los Santos RED/ElectroInventoryActionProtocol.cs b/Los Santos RED/ElectroInventoryActionProtocol.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..582c7a8c60911b76ac2a952550e4bfffd8a31080
+index 0000000000000000000000000000000000000000..10c0c17fd8fbb81f775e47d0c058b35c025fee96
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryActionProtocol.cs	
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,92 @@
 +using System;
 +using System.IO.MemoryMappedFiles;
 +using System.Threading;
@@ -32,9 +32,12 @@ index 0000000000000000000000000000000000000000..582c7a8c60911b76ac2a952550e4bfff
 +    internal static class ActionProtocol
 +    {
 +        public const int Magic = 0x45494132, Capacity = 65536, Offers = 160, OfferSize = 24;
-+        public const int FocusRequest = 49000, FocusGrant = 49024;
++        public const int FocusRequest = 49000, FocusGrant = 49024, DiagnosticsFlag = 49048, FocusPolicy = 49052;
 +        public static readonly long FocusLifetime = System.Diagnostics.Stopwatch.Frequency * 3 / 4;
 +        public static readonly long FocusClientMargin = System.Diagnostics.Stopwatch.Frequency / 10;
++
++        public static bool OwnsPool(bool lease, object registered, object candidate) =>
++            lease && registered != null && ReferenceEquals(registered, candidate);
 +
 +        public static bool HasFocus(Guid session, Guid grant, long expires, long now, long margin = 0) =>
 +            session != Guid.Empty && session == grant && expires > now && expires - now > margin;
@@ -95,10 +98,10 @@ index 0000000000000000000000000000000000000000..582c7a8c60911b76ac2a952550e4bfff
 +}
 diff --git a/Los Santos RED/ElectroInventoryActionServer.cs b/Los Santos RED/ElectroInventoryActionServer.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..ffa784b9494c1a605c12aa1e1296dc7e3ddc5c4d
+index 0000000000000000000000000000000000000000..e17e8a36ddf6f13c91e493529348eb1ea4be3903
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryActionServer.cs	
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,175 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Diagnostics;
@@ -126,6 +129,7 @@ index 0000000000000000000000000000000000000000..ffa784b9494c1a605c12aa1e1296dc7e
 +        private Guid revision, replyId;
 +        private ActionResult reply;
 +        private bool disabled, executing;
++        private string lastDiagnostic;
 +
 +        internal void Update(int pid, long stamp, Snapshot snapshot, byte[] payload,
 +            List<InventoryActionBinding> current, bool focusEligible)
@@ -160,6 +164,20 @@ index 0000000000000000000000000000000000000000..ffa784b9494c1a605c12aa1e1296dc7e
 +                    var granted = grant ? focusRequest : Guid.Empty;
 +                    long until = grant ? requested + ActionProtocol.FocusLifetime : 0;
 +                    ElectroInventoryPublisher.SetMenuFocus(granted, until);
++                    view.Write(ActionProtocol.FocusPolicy, snapshot.NativeTradeOnly ? 2 : focusEligible ? 1 : 0);
++                    if (view.ReadInt32(ActionProtocol.DiagnosticsFlag) == 1)
++                    {
++                        string reason = grant ? "concedido" : snapshot.NativeTradeOnly ? "NPC exige executor nativo" :
++                            !focusEligible ? "sem pool/contexto elegível" : "aguardando solicitação vigente";
++                        string summary = $"modo {snapshot.Mode} / {(focusEligible ? "pool da interação" : "pool sem concessão")} / foco {reason}; " +
++                            $"comprar {snapshot.Rows.Count(x => x.Group == 4)}, vender {snapshot.Rows.Count(x => x.Group == 5)}, " +
++                            $"autorizações {current.Count(x => x != null)}";
++                        if (summary != lastDiagnostic)
++                        {
++                            lastDiagnostic = summary;
++                            Rage.Game.LogTrivial("[ElectroInventory RC2] " + summary);
++                        }
++                    }
 +                    ActionProtocol.WriteGuid(view, ActionProtocol.FocusGrant, granted);
 +                    view.Write(ActionProtocol.FocusGrant + 16, until);
 +                    if (view.ReadInt32(64) == 1)
@@ -403,7 +421,7 @@ index 0000000000000000000000000000000000000000..d5db8ff9ac0c0faed48803708c1cb4bf
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..628783085fc5f26a4ed87757cb034d3195aef8f4
+index 0000000000000000000000000000000000000000..ca78f2bf1690465c7e7a829067af2395cbf2fb5f
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
 @@ -0,0 +1,302 @@
@@ -425,8 +443,8 @@ index 0000000000000000000000000000000000000000..628783085fc5f26a4ed87757cb034d31
 +        private static long mouseExpires;
 +
 +        internal static bool HidesMenuBanners(RAGENativeUI.MenuPool pool) =>
-+            owner != null && ReferenceEquals(pool, focusPool) &&
-+            ActionProtocol.HasFocus(contextSession, mouseSession, mouseExpires, Stopwatch.GetTimestamp()) &&
++            owner != null && ActionProtocol.OwnsPool(
++                ActionProtocol.HasFocus(contextSession, mouseSession, mouseExpires, Stopwatch.GetTimestamp()), focusPool, pool) &&
 +            Stopwatch.GetTimestamp() - touch <= Stopwatch.Frequency / 2;
 +
 +        internal static bool OwnsMenuInput(RAGENativeUI.MenuPool pool) =>

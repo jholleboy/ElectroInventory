@@ -10,6 +10,7 @@ namespace ElectroInventory
     internal sealed class ActionClient : IDisposable
     {
         private readonly int pid;
+        private readonly bool diagnostics;
         private MemoryMappedFile map;
         private MemoryMappedViewAccessor view;
         private Mutex mutex;
@@ -17,10 +18,11 @@ namespace ElectroInventory
         private Guid pending;
         public Guid Revision { get; private set; }
         public ActionOffer[] Offers { get; private set; } = new ActionOffer[0];
+        public bool NativeTradeOnly { get; private set; }
         public bool Busy => pending != Guid.Empty;
         public ActionResult Result { get; private set; }
 
-        public ActionClient(int pid) { this.pid = pid; }
+        public ActionClient(int pid, bool diagnostics = false) { this.pid = pid; this.diagnostics = diagnostics; }
 
         public void Poll(long snapshotStamp, int rows)
         {
@@ -41,6 +43,7 @@ namespace ElectroInventory
                 {
                     if (view.ReadInt32(0) != ActionProtocol.Magic || view.ReadInt32(4) != pid)
                         throw new InvalidDataException();
+                    view.Write(ActionProtocol.DiagnosticsFlag, diagnostics ? 1 : 0);
                     if (Busy && ActionProtocol.ReadGuid(view, 40) == pending)
                     {
                         var result = (ActionResult)view.ReadByte(56);
@@ -56,6 +59,7 @@ namespace ElectroInventory
                         Offers = new ActionOffer[0];
                         return;
                     }
+                    NativeTradeOnly = view.ReadInt32(ActionProtocol.FocusPolicy) == 2;
                     Guid revision = ActionProtocol.ReadGuid(view, 16);
                     if (revision == Revision) return;
                     int count = view.ReadInt32(32);
@@ -137,6 +141,7 @@ namespace ElectroInventory
             view = null; map = null; mutex = null;
             Revision = pending = Guid.Empty;
             Offers = new ActionOffer[0];
+            NativeTradeOnly = false;
         }
     }
 }

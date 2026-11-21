@@ -26,9 +26,12 @@ namespace ElectroInventory.Wire
     internal static class ActionProtocol
     {
         public const int Magic = 0x45494132, Capacity = 65536, Offers = 160, OfferSize = 24;
-        public const int FocusRequest = 49000, FocusGrant = 49024;
+        public const int FocusRequest = 49000, FocusGrant = 49024, DiagnosticsFlag = 49048, FocusPolicy = 49052;
         public static readonly long FocusLifetime = System.Diagnostics.Stopwatch.Frequency * 3 / 4;
         public static readonly long FocusClientMargin = System.Diagnostics.Stopwatch.Frequency / 10;
+
+        public static bool OwnsPool(bool lease, object registered, object candidate) =>
+            lease && registered != null && ReferenceEquals(registered, candidate);
 
         public static bool HasFocus(Guid session, Guid grant, long expires, long now, long margin = 0) =>
             session != Guid.Empty && session == grant && expires > now && expires - now > margin;
