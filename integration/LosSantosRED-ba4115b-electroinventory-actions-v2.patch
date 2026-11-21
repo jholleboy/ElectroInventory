@@ -457,10 +457,10 @@ index 0000000000000000000000000000000000000000..0af08027e3e9c38830b3d850e2708d9c
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..44ae07a3cc2e881069a33197887dc319f40b475f
+index 0000000000000000000000000000000000000000..1fa241854a8a60a626adb20a238f8caa8d9dd6b6
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
-@@ -0,0 +1,386 @@
+@@ -0,0 +1,387 @@
 +using ElectroInventory.Wire;
 +using Rage;
 +using System;
@@ -695,11 +695,12 @@ index 0000000000000000000000000000000000000000..44ae07a3cc2e881069a33197887dc319
 +                {
 +                    if (snapshot.Rows.Count >= Protocol.MaxRows) { snapshot.Incomplete = true; break; }
 +                    snapshot.Rows.Add(new Entry { Id = weapon.WeaponHash.ToString(), Name = weapon.ElectroInventoryDisplayName,
-+                        Category = "Armas", Quantity = 1, Group = 2, Detail = "Munição: " + weapon.Ammo });
++                        Category = "Armas", Quantity = 1, Group = 2, Detail = "Munição armazenada: " + weapon.Ammo + " · Retirada pelo menu original." });
 +                }
 +            if (cash != null && snapshot.Rows.Count < Protocol.MaxRows)
 +                snapshot.Rows.Add(new Entry { Id = "cash", Name = "Dinheiro em espécie", Category = "Dinheiro",
-+                    Quantity = cash.StoredCash, Group = 3, Detail = "Limite configurado: $ " + cash.ElectroInventoryCashLimit });
++                    Quantity = cash.StoredCash, Group = 3, Detail = "Teto de depósito da RC2: $ " + cash.ElectroInventoryCashLimit +
++                        " (exclusivo). Depósito e retirada de dinheiro pelo menu original." });
 +        }
 +
 +        private static void CopyItems(Snapshot snapshot, List<InventoryItem> items, byte group,

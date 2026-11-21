@@ -135,7 +135,7 @@ namespace ElectroInventory
                     if (ownsInput)
                         Button(g, new Rectangle(970, 607, 266, 41), "Fechar e usar controles originais", () => CloseRequested = true);
                 }
-                else DrawActions(g, action, result, busy, passive, snapshot.Mode == 2, row);
+                else DrawActions(g, action, result, busy, passive, snapshot.Mode, row);
                 Line(g, 25, 704, Width - 25, 704, Edge);
                 Text(g, snapshot.Mode == 2
                     ? "F10 fecha  ·  Clique ou Ctrl+F2 Comprar/Vender  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela"
@@ -228,8 +228,9 @@ namespace ElectroInventory
             Text(g, row.Detail, 971, 510, 370, 48, 16, Muted, false);
         }
 
-        private void DrawActions(Graphics g, ActionSelection action, ActionResult result, bool busy, bool passive, bool trade, Entry row)
+        private void DrawActions(Graphics g, ActionSelection action, ActionResult result, bool busy, bool passive, byte mode, Entry row)
         {
+            bool trade = mode == 2;
             string status = busy ? "Aguardando o LS RED…" : result == ActionResult.Started ? "Atividade iniciada no LS RED." :
                 result == ActionResult.Success ? "Operação concluída." : result == ActionResult.Expired ? "Contexto alterado. Selecione novamente." :
                 result == ActionResult.Rejected ? "Operação recusada pelo LS RED." : result == ActionResult.Uncertain ?
@@ -237,7 +238,11 @@ namespace ElectroInventory
             Text(g, status, 970, 655, 380, 26, 15, Muted, false);
             if (action.Kind == ActionKind.None || busy)
             {
-                if (!busy) Text(g, trade ? "Preço informativo. Ação indisponível neste contexto." : "Ação indisponível nesta seleção.", 970, 603, 380, 42, 16, Muted, false);
+                if (!busy && mode == 1 && row != null && !passive)
+                    Button(g, new Rectangle(970, 601, 280, 39), "Voltar ao menu de armazenamento", () => CloseRequested = true);
+                else if (!busy)
+                    Text(g, trade ? "Preço informativo. Ação indisponível neste contexto." : "Ação indisponível nesta seleção.",
+                        970, 603, 380, 42, 16, Muted, false);
                 return;
             }
             string label = ActionSelection.Label(action.Kind);
