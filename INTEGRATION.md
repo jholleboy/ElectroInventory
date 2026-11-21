@@ -23,3 +23,32 @@ Toda operação exige revalidação no momento da execução, inclusive depois d
 4. Escolher semântica de revisões, identificadores de pilhas/ofertas e resultado de operações assíncronas, em especial a fração final.
 5. Dividir os adaptadores por família. Serviços, veículos, equipamentos e armas precisam de contratos próprios quando diferirem do varejo convencional.
 6. Definir testes de concorrência e restauração antes da substituição. Brincar com dados fictícios só no protótipo visual e com indicação explícita.
+
+## Ponte implementada na Fase 3
+
+Use o patch `integration/LosSantosRED-ba4115b-electroinventory-read-v1.patch` a partir de uma cópia limpa em `ba4115b`:
+
+```powershell
+$patch = 'C:\src\ElectroInventory\integration\LosSantosRED-ba4115b-electroinventory-read-v1.patch'
+git apply --check $patch
+if ($LASTEXITCODE -ne 0) { throw 'Confira o checkout limpo da RC2 em ba4115b.' }
+git apply $patch
+```
+
+Compile a cópia da RC2 pelo procedimento do repositório LS RED e instale sua DLL e seu catálogo PT-BR. A publicação foi preparada sem referência ao ElectroHud. Os patches ElectroInventory e ElectroHud V6 puderam ser aplicados juntos a uma cópia temporária. A coexistência em execução continua pendente.
+
+O SDK do RPH oferece o evento RawFrameRender e texturas. Escolhemos GDI+ para rasterizar o painel em PNG temporário e o RPH para desenhar a textura em uma região central proporcional. Isso evita servidor HTTP, navegador embutido e outra dependência de UI. A textura é reutilizada quando os dados e a seleção não mudam. Foco, cursor e controles são de responsabilidade do plugin. A digitação em jogo aceita letras latinas e espaços, com busca insensível a acentos. O protótipo web retém o suporte do navegador a IME e edição completa. A área de detalhes tem altura fixa e pode abreviar textos extensos.
+
+### Contrato de leitura 1
+
+Canal `Local\ElectroInventory.Lsr.read.v1.<PID>`; mutex de tentativa imediata `.Lock`; mapa de 1 MiB. Cabeçalho little-endian tem magic `0x45494E31` no offset 0, versão no 4, PID no 8, comprimento no 12, timestamp monotônico no 16. O produtor invalida o timestamp antes de gravar e confirma por último, sob o mutex. O consumidor abre a visão com direitos somente leitura. Rejeita versão/PID inesperados, dados incompletos, tamanho fora do limite e snapshots com mais de dois segundos. Timestamp zero encerra a sessão. Um GUID distingue sessões e o handle distingue a troca de personagem.
+
+Payload inclui GUID, handle, modo, bloqueio de entrada, indicador de lista parcial, saldo opcional, título e até 2.000 linhas. Cada linha tem grupo, quantidade e preço double, ID original e textos UTF-8 delimitados por comprimento. NaN significa valor indisponível. Texto é limitado por campo; a interface identifica lista parcial. Grupos 0/1 são itens do jogador/contêiner, 2 armas de depósito, 3 dinheiro de depósito, 4 compra e 5 venda. Não há mensagem, canal ou executor de ações. Os indicativos de consumível e posse informam propriedades existentes, sem representar autorização atual para executar a ação.
+
+### Cobertura e limites
+
+- **Pessoal:** usa nome interno, tradução da RC2, categoria, descrição, fração e propriedades do item. O bloqueio lê menus, telefone, atividade, radial, algemas e VehicleShowcase. O cliente também verifica pausa, fade, cutscene e personagem atual. A entrega não registra I globalmente no Windows.
+- **Imóveis:** leitura dos pontos internos autorizados via `Residence/Business.CreateInventoryMenu`. Só publica recipientes habilitados e aplica a precedência de filtros da RC2. O menu geral de administração do imóvel não abre uma sessão de inspeção. O limite de depósito de dinheiro documentado na auditoria permanece no menu original.
+- **Veículos:** lê enquanto o submenu raiz de armazenamento estiver visível, dentro das regras de acesso do veículo. Itens, armas e dinheiro permanecem grupos distintos. A inspeção fecha ao trocar de submenu ou perder o acesso.
+- **Comércio:** observa `Transaction.Update`, incluindo sessões válidas de NPC. Preço por pacote e disponibilidade são publicados quando a linha genérica fornece os dados. Armas, veículos e serviços aparecem com descrição e orientação ao menu original quando preço final/disponibilidade dependem de estado especializado. Lojas com menus fora de `Transaction`, como roupa e salão, permanecem fora desta inspeção.
+- **Foco:** F10 é um visor passivo de diagnóstico para evitar concorrer com a interface original. Os teclados de paginação do visor são locais ao seu fluxo e não bloqueiam o menu original. A troca de interface e a captura completa de entrada em armazenamento e comércio pertencem à Fase 5.

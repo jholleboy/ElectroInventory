@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ElectroInventory>
+  <Enabled>true</Enabled>
+  <Mode>Live</Mode>
+  <Diagnostics>true</Diagnostics>
+  <ToggleKey>I</ToggleKey>
+  <InspectKey>F10</InspectKey>
+</ElectroInventory>

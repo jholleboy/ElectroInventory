@@ -15,3 +15,14 @@ Para repetir manualmente, use o comando do README e experimente imóvel/veículo
 5. Compare varejo, NPC, estoque finito, preço variável, saldo insuficiente, consumo na compra, venda e quantidade. Cubra arma/munição, roupa, veículo, serviços e cancelamento de preview.
 6. Injete em ambiente de teste mensagens obsoletas e duplicadas, mudança de sessão entre seleção e confirmação, respostas perdidas e descarga. O resultado deve ser no máximo uma alteração válida e fallback sem dois menus.
 7. Confira 1080p, 16:10 e ultrawide, pesquisa, foco, rolagem e convivência com ElectroHud. Compare saves antes e depois pelo fluxo normal do jogo.
+
+## Fase 3 — leitura no GTA V Legacy
+
+1. Em .NET 8, execute `dotnet run --project tests/ProtocolTests.csproj` para verificar o contrato independente do SDK. Em Windows, compile e empacote com os scripts do README e confirme a instalação da RC2 com o patch.
+2. Em Live, entre com RC2 indisponível e pressione I. Confira o log e a ausência de dados fictícios. Inicie/descarregue a RC2, troque de personagem e confira abertura, encerramento e restauração. Repita com inventário vazio, muitos itens, nomes repetidos e fração real.
+3. Confira I/Esc, pesquisa incluindo a letra I, roda, setas e cursor. Use o VehicleShowcase e confirme que I continua com ele. Teste pausa, telefone, radial, algemas e menus. Compare o comportamento de F9 do ElectroHud e de F10 da inspeção.
+4. Abra o recipiente real de um imóvel ou veículo. Pressione F10. Compare as quantidades, o acesso a armas/dinheiro e o fechamento ao sair do contexto. O menu original continua operável. Nenhuma entrada de transferência é emitida pela inspeção.
+5. Faça o mesmo em varejo, NPC e em um contexto especializado. Compare preço por pacote e ofertas limitadas onde publicados, além do saldo. Confira indicação explícita quando o preço final só estiver no menu.
+6. Teste resolução e sobreposições com ElectroHud, captura do cursor por frame e recuperação ao descarregar. Confira que o log não registra textos dos itens nem dados de saldo. Registre versão do jogo/RPH e o caminho em que houve falha.
+
+Foram executados testes independentes do protocolo e análise de sintaxe C# 7.3. A compilação com o SDK oficial e os testes de renderização, entrada e coexistência dentro do jogo continuam pendentes.
