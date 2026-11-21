@@ -57,3 +57,12 @@ No teste integrado, abra F10 num comerciante comum que compre e venda. Use Ctrl+
 O console testa concessão por sessão, rejeição quando o contexto não é elegível, expiração, borda de clique e despacho de alvos para cartão, abas e confirmação. A suíte também cobre o mapeamento do cursor e Escape. Esses testes exercitam a lógica comum; o processamento do RAGENativeUI e o desenho do cursor devem ser verificados no GTA V.
 
 No teste integrado, abra F10 em The Families Den e no armazenamento de um veículo ou imóvel. Clique em ambas as abas, em cartões e, onde houver oferta autorizada, em quantidade e confirmação/cancelamento. Confira que o menu nativo não recebe seleção ou ativação durante os cliques. Feche com F10 ou Esc, repita mantendo o clique pressionado e verifique a devolução do controle. Repita sem a ponte atualizada para confirmar o fallback passivo e com ElectroHud V6 ativo.
+
+## Rodada integrada V3
+
+A suíte de console cobre concessão e expiração, cliques em alvos, fechamento por Esc/F10, perda da sessão, troca de personagem, mapeamento em 720p/1080p/16:10/ultrawide, limites e frações, cotação, revisão e repetições. O teste de coordenadas usa a mesma função de escala do cliente. Os efeitos reais de transferência e comércio continuam pendentes no jogo.
+
+1. Instale as duas DLLs compiladas a partir do V3 e do patch atualizado em RC2 limpa. Se usar ElectroHud, aplique seu patch V6 na mesma cópia da RC2.
+2. Abra comércio e armazenamento pelo jogo e pressione F10. Confira que o menu nativo e seu banner somem apenas com concessão válida. Feche com F10 ou Esc e confira retorno ao mesmo menu e seleção. Teste descarregamento, perda de acesso, troca de personagem e fechamento externo.
+3. Compare as grades e o cursor em 1080p e ultrawide. Navegue por filtros, busca, paginação, mouse, teclado e troca de lado. Confirme ícones padrão com pasta de imagens ausente e com arquivo inválido.
+4. Em armazenamento, compare antes e depois nos dois lados, inclusive pilha fracionária. Em comércio genérico, compare preço, quantidade, total, saldo e atualização de ambas as abas após compra e venda. Tente clique duplo e cotação vencida. Repita em contextos passivos e especializados.

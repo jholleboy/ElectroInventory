@@ -14,6 +14,7 @@ internal static class Program
     private static void Main()
     {
         CheckOverlayInput();
+        CheckV3();
         CheckFocusAndClicks();
         CheckActions();
         CheckTrade();
@@ -191,6 +192,39 @@ internal static class Program
         Require(!targets.Click(new Point(240, 60)) && confirmed == 1);
         Require(!ActionProtocol.HasFocus(session, session, now, now)); // pool can resume
         Console.WriteLine("Foco: concessão, cliques, perda da sessão e devolução passaram.");
+    }
+
+    private static void CheckV3()
+    {
+        var session = Guid.NewGuid();
+        Require(ElectroInventory.OverlaySession.Matches(session, session, 41, 41, true, false));
+        Require(!ElectroInventory.OverlaySession.Matches(session, Guid.Empty, 41, 41, true, false));
+        Require(!ElectroInventory.OverlaySession.Matches(session, session, 41, 42, true, false));
+        Require(!ElectroInventory.OverlaySession.Matches(session, session, 41, 41, false, false));
+        Require(ElectroInventory.OverlaySession.CloseRequested(true, false, true, false, false, false, false));
+        Require(!ElectroInventory.OverlaySession.CloseRequested(true, false, false, false, true, false, false));
+        Require(ElectroInventory.OverlaySession.CloseRequested(true, true, false, false, true, false, false));
+        Require(!ElectroInventory.OverlaySession.CloseRequested(true, true, false, false, true, true, false));
+
+        var design = new Size(1400, 760);
+        foreach (var size in new[] { new Size(1280, 720), new Size(1920, 1080), new Size(1920, 1200), new Size(3440, 1440) })
+        {
+            var bounds = ElectroInventory.OverlayViewport.Fit(size, design);
+            Require(bounds.Width > 0 && bounds.Height > 0 && bounds.Left > 0 && bounds.Top > 0);
+            Require(Math.Abs(bounds.Width / bounds.Height - 1400f / 760f) < .001);
+            Require(ElectroInventory.OverlayPointer.TryMap(size.Width / 2f, size.Height / 2f, bounds, design, out var center));
+            Require(Math.Abs(center.X - 700) <= 1 && Math.Abs(center.Y - 380) <= 1);
+        }
+        Require(ElectroInventory.OverlayViewport.Fit(Size.Empty, design).IsEmpty);
+
+        var offer = new ActionOffer { Token = Guid.NewGuid(), Kinds = ActionKind.Buy, Maximum = 4 };
+        var row = new Entry { Group = 4, Price = 13 };
+        Require(ElectroInventory.TradeTabs.Total(row, offer, 3) == 39);
+        Require(ElectroInventory.TradeTabs.Total(row, offer, 5) == null);
+        Require(ElectroInventory.TradeTabs.Total(row, null, 1) == null);
+        Require(ActionProtocol.ExactTransfer(5.25f, 2.5f, 3));
+        Require(!ActionProtocol.ExactTransfer(2.25f, 2.5f, 3));
+        Console.WriteLine("V3: sessões, F10/Esc, personagem, diferentes proporções e totais passaram.");
     }
 
     private static void CheckOverlayInput()

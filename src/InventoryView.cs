@@ -173,7 +173,7 @@ namespace ElectroInventory
                 {
                     var badge = new Rectangle(card.Right - 72, card.Y + 7, 65, 23);
                     Box(g, badge, Color.FromArgb(9, 25, 38), Edge);
-                    Text(g, "×" + Quantity(row.Quantity), badge.X + 4, badge.Y + 2, 58, 19, 14, Cyan, true);
+                    Text(g, (row.Group == 3 ? "$ " : "×") + Quantity(row.Quantity), badge.X + 4, badge.Y + 2, 58, 19, 14, Cyan, true);
                 }
                 Text(g, row.Name, card.X + 7, card.Y + 35, card.Width - 14, 27, 16, Ink, true);
                 Text(g, row.Group >= 4 ? Summary(row) : row.Category, card.X + 7, card.Bottom - 22, card.Width - 14, 20, 14, selected ? Ink : Muted, false);

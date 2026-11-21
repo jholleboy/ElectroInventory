@@ -4,6 +4,19 @@ using System.Collections.Generic;
 
 namespace ElectroInventory
 {
+    internal static class OverlaySession
+    {
+        public static bool Matches(Guid openSession, Guid snapshotSession, int snapshotCharacter,
+            int currentCharacter, bool available, bool demo) =>
+            available && openSession != Guid.Empty && openSession == snapshotSession &&
+            (demo || (currentCharacter != 0 && snapshotCharacter == currentCharacter));
+
+        public static bool CloseRequested(bool contextual, bool ownsInput, bool inspectPressed,
+            bool togglePressed, bool escapePressed, bool searching, bool closeButton) =>
+            (contextual && inspectPressed) || (ownsInput && (closeButton || (escapePressed && !searching))) ||
+            (!contextual && togglePressed && !searching);
+    }
+
     internal sealed class PauseGuard
     {
         private bool captured;

@@ -129,8 +129,10 @@ namespace ElectroInventory
                     || NativeFunction.Natives.IS_SCREEN_FADED_OUT<bool>()
                     || NativeFunction.Natives.IS_SCREEN_FADING_OUT<bool>();
                 var ped = Game.LocalPlayer.Character;
-                bool available = !blocked && ped != null && ped.Exists() && (demo || sample?.Character == unchecked((int)(uint)ped.Handle));
-                if (open && (!available || sample == null || (!passive && (!ped.IsVisible || sample.BlocksInput))))
+                int character = ped != null && ped.Exists() ? unchecked((int)(uint)ped.Handle) : 0;
+                bool available = character != 0 && sample != null &&
+                    OverlaySession.Matches(sample.Session, sample.Session, sample.Character, character, !blocked, demo);
+                if (open && (!available || sample.Session != session || (!passive && (!ped.IsVisible || sample.BlocksInput))))
                 {
                     open = false;
                     ReleaseTexture();
@@ -141,8 +143,8 @@ namespace ElectroInventory
                     escape = false;
                     refresh = true;
                 }
-                if (open && ((passive && inspectPressed) || (ownsInput && (layout.CloseRequested || (escape && !nav.Search)))
-                    || (!passive && togglePressed && !nav.Search)))
+                if (open && OverlaySession.CloseRequested(passive, ownsInput, inspectPressed,
+                    togglePressed, escape, nav.Search, layout.CloseRequested))
                 {
                     open = false;
                     ReleaseTexture();
