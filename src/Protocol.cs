@@ -18,6 +18,7 @@ namespace ElectroInventory.Wire
     {
         public Guid Session;
         public long PublicationStamp;
+        internal object StorageContext;
         public int Character;
         public byte Mode; // 0 inventory, 1 storage, 2 trade
         public bool BlocksInput, Incomplete;

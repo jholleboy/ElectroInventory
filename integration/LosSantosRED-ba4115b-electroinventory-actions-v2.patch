@@ -222,10 +222,10 @@ index 0000000000000000000000000000000000000000..8c480426685048baace6e9648879f140
 +}
 diff --git a/Los Santos RED/ElectroInventoryProtocol.cs b/Los Santos RED/ElectroInventoryProtocol.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..aa0eabb23b52a655bf102b9b16c907bc7fec0ea3
+index 0000000000000000000000000000000000000000..4acd3296554e729707179d0bf44169e8e6c95991
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryProtocol.cs	
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,134 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Diagnostics;
@@ -246,6 +246,7 @@ index 0000000000000000000000000000000000000000..aa0eabb23b52a655bf102b9b16c907bc
 +    {
 +        public Guid Session;
 +        public long PublicationStamp;
++        internal object StorageContext;
 +        public int Character;
 +        public byte Mode; // 0 inventory, 1 storage, 2 trade
 +        public bool BlocksInput, Incomplete;
@@ -361,10 +362,10 @@ index 0000000000000000000000000000000000000000..aa0eabb23b52a655bf102b9b16c907bc
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..8bb4b3481a91fbb355851a529082e03ed1efeb22
+index 0000000000000000000000000000000000000000..0f1250cc8b4bdeec5c94079e7e359de5754fadcd
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,269 @@
 +using ElectroInventory.Wire;
 +using Rage;
 +using System;
@@ -449,10 +450,63 @@ index 0000000000000000000000000000000000000000..8bb4b3481a91fbb355851a529082e03e
 +            fill = null;
 +        }
 +
++        private sealed class StorageAuthority
++        {
++            public SimpleInventory Items;
++            public List<ItemType> Allowed, Denied;
++
++            public bool Includes(ItemType type) => Allowed != null && Allowed.Count > 0
++                ? Allowed.Contains(type) : Denied == null || !Denied.Contains(type);
++        }
++
++        private static bool ContextStillValid(ModController controller, Snapshot snapshot) =>
++            SameCharacter(controller, snapshot.Character) && controller.Player.IsAliveAndFree &&
++            !controller.IsDisplayingAlertScreen && !controller.Player.CuffManager.IsHandcuffed
++            && owner != null && contextSession == snapshot.Session
++            && Stopwatch.GetTimestamp() - touch <= Stopwatch.Frequency / 2 && valid();
++
++        private static InventoryActionBinding StorageBinding(ModController controller, Snapshot snapshot, Entry row)
++        {
++            if (!(snapshot.StorageContext is StorageAuthority authority) || (row.Group != 0 && row.Group != 1))
++                return null;
++            var player = controller.Player;
++            bool take = row.Group == 1;
++            var source = take ? authority.Items.ItemsList : player.Inventory.ItemsList;
++            var target = take ? player.Inventory.ItemsList : authority.Items.ItemsList;
++            var item = source.Find(candidate => candidate.ModItem?.Name == row.Id);
++            if (item == null || !authority.Includes(item.ModItem.ItemType) || row.Quantity < 1
++                || row.Quantity >= int.MaxValue || source.FindLast(candidate => candidate.ModItem?.Name == row.Id) != item
++                || target.Find(candidate => candidate.ModItem?.Name == row.Id) != target.FindLast(candidate => candidate.ModItem?.Name == row.Id))
++                return null;
++            int maximum = (int)Math.Floor(row.Quantity);
++            return new InventoryActionBinding
++            {
++                Identity = item, Offer = new ActionOffer { Token = Guid.NewGuid(), Kinds = take ? ActionKind.Take : ActionKind.Deposit,
++                    Maximum = maximum },
++                Execute = command =>
++                {
++                    if (!ContextStillValid(controller, snapshot) || source.Find(candidate => candidate.ModItem?.Name == row.Id) != item
++                        || source.FindLast(candidate => candidate.ModItem?.Name == row.Id) != item || item.RemainingPercent != row.Quantity
++                        || !authority.Includes(item.ModItem.ItemType) || command.Quantity > Math.Floor(item.RemainingPercent))
++                        return ActionResult.Expired;
++                    var destination = target.Find(candidate => candidate.ModItem?.Name == row.Id);
++                    if (destination != target.FindLast(candidate => candidate.ModItem?.Name == row.Id)
++                        || (destination != null && (float.IsNaN(destination.RemainingPercent) ||
++                            float.IsInfinity(destination.RemainingPercent) || destination.RemainingPercent < 0 ||
++                            destination.RemainingPercent + command.Quantity - destination.RemainingPercent != command.Quantity)))
++                        return ActionResult.Rejected;
++                    return item.ModItem.TransferElectroInventory(player, authority.Items, command.Quantity, take, false)
++                        ? ActionResult.Success : ActionResult.Rejected;
++                }
++            };
++        }
++
 +        internal static void Storage(Snapshot snapshot, string title, SimpleInventory items,
-+            WeaponStorage weapons, CashStorage cash, List<ItemType> allowed, List<ItemType> denied)
++            WeaponStorage weapons, CashStorage cash, List<ItemType> allowed, List<ItemType> denied, bool withAnimations)
 +        {
 +            snapshot.Mode = 1;
++            if (!withAnimations && items != null)
++                snapshot.StorageContext = new StorageAuthority { Items = items, Allowed = allowed, Denied = denied };
 +            snapshot.Title = title;
 +            var restrictions = new List<string>();
 +            if (items != null) restrictions.Add("Itens");
@@ -546,7 +600,8 @@ index 0000000000000000000000000000000000000000..8bb4b3481a91fbb355851a529082e03e
 +                    view.Write(16, stamp);
 +                }
 +                finally { if (held) mutex.ReleaseMutex(); }
-+                var bindings = snapshot.Rows.ConvertAll(row => PersonalBinding(controller, snapshot, row));
++                var bindings = snapshot.Rows.ConvertAll(row => snapshot.Mode == 1
++                    ? StorageBinding(controller, snapshot, row) : PersonalBinding(controller, snapshot, row));
 +                actions.Update(pid, stamp, snapshot, payload, bindings);
 +            }
 +            catch (ThreadAbortException) { throw; }
@@ -683,7 +738,7 @@ index 9c4fed33ae3f2b21b57f1655f1d85a5b2ce55740..7ca80677550575c32e3627c14a9de5df
          if (removeBanner)
          {
 diff --git a/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs b/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs
-index 802261ec553df5c8c7d38d3efdde0927d4d964b2..eb03f2bfca859f3e3506acd9a76db8b9e6ee0ff5 100644
+index 802261ec553df5c8c7d38d3efdde0927d4d964b2..a62847bd762e2b378341ef9a30d912239f9a6bb6 100644
 --- a/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs	
 +++ b/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs	
 @@ -443,11 +443,17 @@ public class Business : GameLocation, ILocationSetupable, IRestableLocation, IIn
@@ -692,7 +747,7 @@ index 802261ec553df5c8c7d38d3efdde0927d4d964b2..eb03f2bfca859f3e3506acd9a76db8b9
          }
 +        System.Action<ElectroInventory.Wire.Snapshot> readStorage = snapshot =>
 +            LosSantosRED.lsr.ElectroInventoryPublisher.Storage(snapshot, Name, withItems ? SimpleInventory : null,
-+                withWeapons ? WeaponStorage : null, withCash ? CashStorage : null, AllowedItemTypes, DisallowedItemTypes);
++                withWeapons ? WeaponStorage : null, withCash ? CashStorage : null, AllowedItemTypes, DisallowedItemTypes, withAnimations);
 +        System.Func<bool> storageVisible = () => Player.IsAliveAndFree && IsAnyMenuVisible && IsOwned;
          while (IsAnyMenuVisible || Time.IsFastForwarding)
          {
@@ -705,7 +760,7 @@ index 802261ec553df5c8c7d38d3efdde0927d4d964b2..eb03f2bfca859f3e3506acd9a76db8b9
          Player.ActivityManager.IsInteractingWithLocation = false;
          Player.IsTransacting = false;
 diff --git a/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs b/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs
-index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..247e42e933e3dbef12676af4d7360b83544e0fa9 100644
+index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..e1f92cfae0085dc65c4a76d6ae75ed47d9421786 100644
 --- a/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs	
 +++ b/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs	
 @@ -262,11 +262,17 @@ public class Residence : GameLocation, ILocationSetupable, IRestableLocation, II
@@ -714,7 +769,7 @@ index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..247e42e933e3dbef12676af4d7360b83
          }
 +        System.Action<ElectroInventory.Wire.Snapshot> readStorage = snapshot =>
 +            LosSantosRED.lsr.ElectroInventoryPublisher.Storage(snapshot, Name, withItems ? SimpleInventory : null,
-+                withWeapons ? WeaponStorage : null, withCash ? CashStorage : null, AllowedItemTypes, DisallowedItemTypes);
++                withWeapons ? WeaponStorage : null, withCash ? CashStorage : null, AllowedItemTypes, DisallowedItemTypes, withAnimations);
 +        System.Func<bool> storageVisible = () => Player.IsAliveAndFree && IsAnyMenuVisible && IsOwnedOrRented;
          while (IsAnyMenuVisible || Time.IsFastForwarding || KeepInteractionGoing)
          {
@@ -888,6 +943,60 @@ index 8500d27e10a3d2800dc9111c68780c2ab99400e6..72eea3022cf64e01876a1a5d07192b2c
      private bool CanContinueConversation => Player.IsAliveAndFree && Ped.CanConverse && Ped.Pedestrian.Exists() && Ped.Pedestrian.DistanceTo2D(Player.Character) <= 15f;// && Ped.Pedestrian.Speed <= 3.0f;// ((AssociatedStore != null && AssociatedStore.HasVendor && Player.Character.DistanceTo2D(AssociatedStore.VendorPosition) <= 6f) && (Ped.Pedestrian.Exists() && Ped.Pedestrian.DistanceTo2D(Player.Character) <= 6f)) && Player.CanConverse && Ped.CanConverse;
      public override string DebugString => "";
      public override bool CanPerformActivities { get; set; } = false;
+diff --git a/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs b/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs
+index 8a122346098314ed4dfe74e939c420b1fa320aa3..4ef6c961a87341a1ff38c756877934f6b5b1f480 100644
+--- a/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs	
++++ b/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs	
+@@ -578,14 +578,7 @@ public class ModItem
+         takeScroller = new UIMenuNumericScrollerItem<int>(LanguageStrings.Translate("inventory.take", "Take"), "", 1, 1, 1) { Value = 1, Enabled = true, Formatter = v => v.ToString() + " " + GetDisplayMeasurementName() + (v > 1 ? "(s)" : "") };
+         takeScroller.Activated += (sender, selectedItem) =>
+         {
+-            if(simpleInventory.Remove(this, takeScroller.Value))
+-            {
+-                if(withAnimations)
+-                {
+-                    player.ActivityManager.PerformItemAnimation(this, true);
+-                }
+-                player.Inventory.Add(this,takeScroller.Value);
+-            }
++            TransferElectroInventory(player, simpleInventory, takeScroller.Value, true, withAnimations);
+             UpdateInventoryScrollers(player, simpleInventory, settings);
+         };
+         inventoryItemSubMenu.AddItem(takeScroller);
+@@ -593,14 +586,7 @@ public class ModItem
+         giveScroller = new UIMenuNumericScrollerItem<int>(LanguageStrings.Translate("inventory.deposit", "Deposit"), "", 1, 1, 1) { Value = 1, Enabled = true, Formatter = v => v.ToString() + " " + GetDisplayMeasurementName() + (v > 1 ? "(s)" : "") };
+         giveScroller.Activated += (sender, selectedItem) =>
+         {
+-            if(player.Inventory.Remove(this, giveScroller.Value))
+-            {
+-                if(withAnimations)
+-                {
+-                    player.ActivityManager.PerformItemAnimation(this, false);
+-                }
+-                simpleInventory.Add(this, giveScroller.Value);
+-            }
++            TransferElectroInventory(player, simpleInventory, giveScroller.Value, false, withAnimations);
+             UpdateInventoryScrollers(player, simpleInventory, settings);
+         };
+         inventoryItemSubMenu.AddItem(giveScroller);
+@@ -616,6 +602,17 @@ public class ModItem
+ 
+         UpdateInventoryScrollers(player, simpleInventory, settings);
+     }
++    internal bool TransferElectroInventory(IInteractionable player, SimpleInventory storage, int amount, bool take, bool withAnimations)
++    {
++        bool removed = take ? storage.Remove(this, amount) : player.Inventory.Remove(this, amount);
++        if (!removed) return false;
++        if (withAnimations)
++            player.ActivityManager.PerformItemAnimation(this, take);
++        if (take) player.Inventory.Add(this, amount);
++        else storage.Add(this, amount);
++        return true;
++    }
++
+     public void UpdateInventoryScrollers(IInteractionable player, SimpleInventory simpleInventory, ISettingsProvideable settings)
+     {
+         int storedItems = 0;
 diff --git a/Los Santos RED/lsr/UI/Other/VehicleShowcase.cs b/Los Santos RED/lsr/UI/Other/VehicleShowcase.cs
 index 38c1c13bc4e583b9c4bdbdf34e4231f6d6fbd0dd..6ed5926a8d5c19241fbf558bdbc1f501c6231fb3 100644
 --- a/Los Santos RED/lsr/UI/Other/VehicleShowcase.cs	
@@ -927,7 +1036,7 @@ index 38c1c13bc4e583b9c4bdbdf34e4231f6d6fbd0dd..6ed5926a8d5c19241fbf558bdbc1f501
          Game.LocalPlayer.Character.IsVisible = true;
          NativeFunction.Natives.CLEAR_FOCUS();
 diff --git a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs b/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs
-index 54b02a3921fdb496fc53e4af41312ac6a784d07e..951d8ac20b02252bef3bd32527cd3f16804b9dd2 100644
+index 54b02a3921fdb496fc53e4af41312ac6a784d07e..b9098914ae2307982f425e00292c70f798b61687 100644
 --- a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs	
 +++ b/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs	
 @@ -17,6 +17,8 @@ public class VehicleInteractionMenu
@@ -971,7 +1080,7 @@ index 54b02a3921fdb496fc53e4af41312ac6a784d07e..951d8ac20b02252bef3bd32527cd3f16
 +
 +    private void ReadElectroInventoryStorage(ElectroInventory.Wire.Snapshot snapshot) =>
 +        LosSantosRED.lsr.ElectroInventoryPublisher.Storage(snapshot, VehicleExt.GetCarName(),
-+            VehicleExt.SimpleInventory, VehicleExt.WeaponStorage, VehicleExt.CashStorage, null, null);
++            VehicleExt.SimpleInventory, VehicleExt.WeaponStorage, VehicleExt.CashStorage, null, null, !Player.IsInVehicle);
 +
      protected virtual void ProcessMenu()
      {
