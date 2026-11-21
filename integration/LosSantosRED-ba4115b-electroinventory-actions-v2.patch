@@ -402,10 +402,10 @@ index 0000000000000000000000000000000000000000..840981c46fecb61af1c6df5970601517
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..4c560fbfcd2ffd182a560f6122eef86bd8cae8d5
+index 0000000000000000000000000000000000000000..be5ee1f1e85207f529133dc57c4078bbb9c12122
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
-@@ -0,0 +1,299 @@
+@@ -0,0 +1,302 @@
 +using ElectroInventory.Wire;
 +using Rage;
 +using System;
@@ -423,10 +423,13 @@ index 0000000000000000000000000000000000000000..4c560fbfcd2ffd182a560f6122eef86b
 +        private static Guid mouseSession;
 +        private static long mouseExpires;
 +
-+        internal static bool OwnsMenuInput(RAGENativeUI.MenuPool pool) =>
++        internal static bool HidesMenuBanners(RAGENativeUI.MenuPool pool) =>
 +            owner != null && ReferenceEquals(pool, focusPool) &&
 +            ActionProtocol.HasFocus(contextSession, mouseSession, mouseExpires, Stopwatch.GetTimestamp()) &&
-+            Stopwatch.GetTimestamp() - touch <= Stopwatch.Frequency / 2 && valid();
++            Stopwatch.GetTimestamp() - touch <= Stopwatch.Frequency / 2;
++
++        internal static bool OwnsMenuInput(RAGENativeUI.MenuPool pool) =>
++            HidesMenuBanners(pool) && valid?.Invoke() == true;
 +
 +        internal static void SetMenuFocus(Guid session, long expires)
 +        {
@@ -836,6 +839,52 @@ index 9c4fed33ae3f2b21b57f1655f1d85a5b2ce55740..7ca80677550575c32e3627c14a9de5df
          menuToAdd.MenuItems[menuToAdd.MenuItems.Count() - 1].Description = LanguageStrings.Translate("storage.weapons.manage", "Manage Stored Weapons. Place items within storage, or retrieve them for use.");
          if (removeBanner)
          {
+diff --git a/Los Santos RED/lsr/Locations/Places/GameLocation.cs b/Los Santos RED/lsr/Locations/Places/GameLocation.cs
+index 1161d559b005ff77b681f1de60798fe8a755bef4..2658dc3e6ca85b761ac15b8bea14f7657cf094dd 100644
+--- a/Los Santos RED/lsr/Locations/Places/GameLocation.cs	
++++ b/Los Santos RED/lsr/Locations/Places/GameLocation.cs	
+@@ -1216,7 +1216,8 @@ public class GameLocation : ILocationDispatchable
+         {
+             BannerImage = Game.CreateTextureFromFile($"Plugins\\LosSantosRED\\images\\{BannerImagePath}");
+             InteractionMenu.SetBannerType(BannerImage);
+-            Game.RawFrameRender += (s, e) => MenuPool.DrawBanners(e.Graphics);
++            Game.RawFrameRender -= DrawElectroInventoryAwareBanners;
++            Game.RawFrameRender += DrawElectroInventoryAwareBanners;
+             RemoveBanner = false;
+             //EntryPoint.WriteToConsoleTestLong($"BANNER REGULAR {BannerImagePath} {HasBannerImage}");
+         }
+@@ -1226,7 +1227,8 @@ public class GameLocation : ILocationDispatchable
+             BannerImage = Game.CreateTextureFromFile($"Plugins\\LosSantosRED\\images\\{Menu.BannerOverride}");
+             InteractionMenu.SetBannerType(BannerImage);
+             RemoveBanner = false;
+-            Game.RawFrameRender += (s, e) => MenuPool.DrawBanners(e.Graphics);
++            Game.RawFrameRender -= DrawElectroInventoryAwareBanners;
++            Game.RawFrameRender += DrawElectroInventoryAwareBanners;
+             //EntryPoint.WriteToConsoleTestLong($"BANNER OVERRIDE {BannerImagePath} {HasBannerImage}");
+         }
+         //InteractionMenu.OnItemSelect += OnItemSelect;
+@@ -1237,7 +1239,7 @@ public class GameLocation : ILocationDispatchable
+     }
+     public void DisposeInteractionMenu()
+     {
+-        Game.RawFrameRender -= (s, e) => MenuPool.DrawBanners(e.Graphics);
++        Game.RawFrameRender -= DrawElectroInventoryAwareBanners;
+         if (InteractionMenu != null)
+         {
+             InteractionMenu.Visible = false;
+@@ -1632,5 +1634,12 @@ public class GameLocation : ILocationDispatchable
+         }
+         EntryPoint.WriteToConsole($"RESETGangTakeoverSetFor {Name} to {OriginalAssignedAssociationID} from {currentAssignedAssociationID}");
+     }
++    private void DrawElectroInventoryAwareBanners(object sender, Rage.GraphicsEventArgs e)
++    {
++        var pool = MenuPool;
++        if (pool != null && !LosSantosRED.lsr.ElectroInventoryPublisher.HidesMenuBanners(pool))
++            pool.DrawBanners(e.Graphics);
++    }
++
+ }
+ 
 diff --git a/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs b/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs
 index 802261ec553df5c8c7d38d3efdde0927d4d964b2..e48d323f41ef202c262f687f1a05c02476dda87f 100644
 --- a/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs	
@@ -1128,7 +1177,7 @@ index f36a5c8fe7320101a3de19a3398ed937986c3bb1..3d01f52e5d4b17adba80352aa37e1200
              Game.DisplayHelp(LanguageStrings.Translate("activity.discarded", "Discarded {0} ({1})", ModItem.Name, Amount));
          }
 diff --git a/Los Santos RED/lsr/Player/Interaction/PersonTransaction.cs b/Los Santos RED/lsr/Player/Interaction/PersonTransaction.cs
-index 8500d27e10a3d2800dc9111c68780c2ab99400e6..72eea3022cf64e01876a1a5d07192b2c6dce2ff3 100644
+index 8500d27e10a3d2800dc9111c68780c2ab99400e6..2e5db2f8181324ce0a8673641b5ddd8213af0f30 100644
 --- a/Los Santos RED/lsr/Player/Interaction/PersonTransaction.cs	
 +++ b/Los Santos RED/lsr/Player/Interaction/PersonTransaction.cs	
 @@ -42,6 +42,7 @@ public class PersonTransaction : Interaction
@@ -1139,6 +1188,38 @@ index 8500d27e10a3d2800dc9111c68780c2ab99400e6..72eea3022cf64e01876a1a5d07192b2c
      private bool CanContinueConversation => Player.IsAliveAndFree && Ped.CanConverse && Ped.Pedestrian.Exists() && Ped.Pedestrian.DistanceTo2D(Player.Character) <= 15f;// && Ped.Pedestrian.Speed <= 3.0f;// ((AssociatedStore != null && AssociatedStore.HasVendor && Player.Character.DistanceTo2D(AssociatedStore.VendorPosition) <= 6f) && (Ped.Pedestrian.Exists() && Ped.Pedestrian.DistanceTo2D(Player.Character) <= 6f)) && Player.CanConverse && Ped.CanConverse;
      public override string DebugString => "";
      public override bool CanPerformActivities { get; set; } = false;
+@@ -475,7 +476,8 @@ public class PersonTransaction : Interaction
+             InteractionMenu = new UIMenu(AssociatedStore.Name, AssociatedStore.DisplayDescription);
+             AssociatedStore.BannerImage = Game.CreateTextureFromFile($"Plugins\\LosSantosRED\\images\\{AssociatedStore.BannerImagePath}");
+             InteractionMenu.SetBannerType(AssociatedStore.BannerImage);
+-            Game.RawFrameRender += (s, e) => MenuPool.DrawBanners(e.Graphics);
++            Game.RawFrameRender -= DrawElectroInventoryAwareBanners;
++            Game.RawFrameRender += DrawElectroInventoryAwareBanners;
+         }
+         else if (AssociatedStore == null || AssociatedStore.RemoveBanner)
+         {
+@@ -491,7 +493,7 @@ public class PersonTransaction : Interaction
+     }
+     public void DisposeInteractionMenu()
+     {
+-        Game.RawFrameRender -= (s, e) => MenuPool.DrawBanners(e.Graphics);
++        Game.RawFrameRender -= DrawElectroInventoryAwareBanners;
+         if (InteractionMenu != null)
+         {
+             InteractionMenu.Visible = false;
+@@ -983,5 +985,12 @@ public class PersonTransaction : Interaction
+     {
+         Player.ButtonPrompts.RemovePrompts("PausedTransaction");
+     }
++    private void DrawElectroInventoryAwareBanners(object sender, Rage.GraphicsEventArgs e)
++    {
++        var pool = MenuPool;
++        if (pool != null && !LosSantosRED.lsr.ElectroInventoryPublisher.HidesMenuBanners(pool))
++            pool.DrawBanners(e.Graphics);
++    }
++
+ }
+ 
 diff --git a/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs b/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs
 index 8a122346098314ed4dfe74e939c420b1fa320aa3..eb8ff613648e2a60c4069023be187f4792a08d1d 100644
 --- a/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs	
@@ -1278,6 +1359,42 @@ index fa36d917e271d44a43f0fa677118954a523340d3..84dc39cb0da2d8ee47413c56cd7be898
          foreach (var menu in pool)
          {
              if (menu.Visible && menu.InstructionalButtonsEnabled)
+diff --git a/Los Santos RED/lsr/Vehicle/Menu/TaxiInteractionMenu.cs b/Los Santos RED/lsr/Vehicle/Menu/TaxiInteractionMenu.cs
+index b3d345d2104b76142a24b51de9831e8c17672a3a..8cc785caea17d3202b8a5a927f60a1d9841aadd2 100644
+--- a/Los Santos RED/lsr/Vehicle/Menu/TaxiInteractionMenu.cs	
++++ b/Los Santos RED/lsr/Vehicle/Menu/TaxiInteractionMenu.cs	
+@@ -332,7 +332,8 @@ public class TaxiInteractionMenu : VehicleInteractionMenu
+                 TaxiRide.RequestedFirm.BannerImage = Game.CreateTextureFromFile($"Plugins\\LosSantosRED\\images\\{TaxiRide.RequestedFirm.BannerImagePath}");
+             }
+             toSet.SetBannerType(TaxiRide.RequestedFirm.BannerImage);
+-            Game.RawFrameRender += (s, e) => MenuPool.DrawBanners(e.Graphics);
++            Game.RawFrameRender -= DrawElectroInventoryAwareBanners;
++            Game.RawFrameRender += DrawElectroInventoryAwareBanners;
+         }
+         else
+         {
+@@ -370,7 +371,7 @@ public class TaxiInteractionMenu : VehicleInteractionMenu
+                 }
+                 IsShowingMenu = false;
+ 
+-                Game.RawFrameRender -= (s, e) => MenuPool.DrawBanners(e.Graphics);
++                Game.RawFrameRender -= DrawElectroInventoryAwareBanners;
+ 
+             }
+             catch (Exception ex)
+@@ -380,5 +381,12 @@ public class TaxiInteractionMenu : VehicleInteractionMenu
+             }
+         }, "VehicleInteraction");
+     }
++    private void DrawElectroInventoryAwareBanners(object sender, Rage.GraphicsEventArgs e)
++    {
++        var pool = MenuPool;
++        if (pool != null && !LosSantosRED.lsr.ElectroInventoryPublisher.HidesMenuBanners(pool))
++            pool.DrawBanners(e.Graphics);
++    }
++
+ }
+ 
 diff --git a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs b/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs
 index 54b02a3921fdb496fc53e4af41312ac6a784d07e..9f39850ab3e9257a1657d6248e469ac7d35390b8 100644
 --- a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs	
