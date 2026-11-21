@@ -34,8 +34,9 @@ namespace ElectroInventory
     public static class Plugin
     {
         private static readonly object RenderLock = new object();
-        private static readonly int[] OverlayControls = { 1, 2, 21, 22, 23, 24, 25, 30, 31, 37, 44, 75, 140, 141, 142, 199, 200, 237 };
-        private static Texture texture;
+        private static readonly int[] OverlayControls = { 1, 2, 21, 22, 23, 24, 25, 30, 31, 37, 44, 75, 140, 141, 142, 237 };
+        private static Texture texture, cursor;
+        private static PointF? cursorPosition;
         private static RectangleF destination;
         private static volatile bool stop;
         private static string temp;
@@ -70,8 +71,11 @@ namespace ElectroInventory
             var layout = new InventoryView();
             var nav = new Navigation();
             var edges = new HashSet<Keys>();
+            var pauseGuard = new PauseGuard();
+            LoadCursor();
             Keys toggle = Parse(config.ToggleKey, Keys.I);
             Keys inspect = Parse(config.InspectKey, Keys.F10);
+            if (inspect == toggle) log("Inspeção desativada: InspectKey e ToggleKey são iguais.");
             bool open = false, passive = false, mousePressed = false, conflictLogged = false;
             Snapshot sample = null;
             Guid session = Guid.Empty;
@@ -81,6 +85,9 @@ namespace ElectroInventory
             Game.RawFrameRender += Draw;
             while (!stop)
             {
+                bool escapeDown = Game.IsKeyDownRightNow(Keys.Escape);
+                if (pauseGuard.Update(open && !passive, escapeDown))
+                    BlockPause();
                 long now = Stopwatch.GetTimestamp();
                 bool refresh = now >= nextRead;
                 if (refresh)
@@ -102,8 +109,8 @@ namespace ElectroInventory
                     || NativeFunction.Natives.IS_SCREEN_FADED_OUT<bool>()
                     || NativeFunction.Natives.IS_SCREEN_FADING_OUT<bool>();
                 var ped = Game.LocalPlayer.Character;
-                bool available = !blocked && ped != null && ped.Exists() && ped.IsVisible && (demo || sample?.Character == unchecked((int)(uint)ped.Handle));
-                if (open && (!available || sample == null || (!passive && sample.BlocksInput)))
+                bool available = !blocked && ped != null && ped.Exists() && (demo || sample?.Character == unchecked((int)(uint)ped.Handle));
+                if (open && (!available || sample == null || (!passive && (!ped.IsVisible || sample.BlocksInput))))
                 {
                     open = false;
                     ReleaseTexture();
@@ -115,7 +122,7 @@ namespace ElectroInventory
                     ReleaseTexture();
                 }
                 else if (!open && available && sample != null &&
-                    ((togglePressed && sample.Mode == 0 && !sample.BlocksInput) || (inspectPressed && sample.Mode != 0)))
+                    ((togglePressed && ped.IsVisible && sample.Mode == 0 && !sample.BlocksInput && !escapeDown) || (inspectPressed && sample.Mode != 0)))
                 {
                     open = true;
                     passive = sample.Mode != 0;
@@ -123,6 +130,15 @@ namespace ElectroInventory
                     nav.Reset();
                     layout.CloseRequested = false;
                     refresh = true;
+                    if (!passive) BlockPause();
+                }
+                else if (inspectPressed && !open)
+                {
+                    string reason = blocked ? "pausa, cena ou tela em transição" :
+                        sample == null ? "sem snapshot válido da RC2" :
+                        !available ? "personagem diferente ou indisponível" :
+                        "nenhuma sessão de comércio ou armazenamento compatível ativa";
+                    log("Inspeção indisponível: " + reason + ".");
                 }
                 else if (togglePressed && !open && !conflictLogged)
                 {
@@ -143,12 +159,13 @@ namespace ElectroInventory
                             NativeFunction.Natives.DISABLE_CONTROL_ACTION(0, control, true);
                         NativeFunction.Natives.SET_MOUSE_CURSOR_THIS_FRAME();
                         bool click = NativeFunction.Natives.IS_DISABLED_CONTROL_PRESSED<bool>(0, 237);
-                        if (click && !mousePressed && bounds.Width > 0)
+                        float x = NativeFunction.Natives.GET_CONTROL_NORMAL<float>(0, 239) * size.Width;
+                        float y = NativeFunction.Natives.GET_CONTROL_NORMAL<float>(0, 240) * size.Height;
+                        bool overPanel = OverlayPointer.TryMap(x, y, bounds, new Size(InventoryView.Width, InventoryView.Height), out Point logical);
+                        lock (RenderLock) cursorPosition = overPanel ? new PointF(x, y) : (PointF?)null;
+                        if (click && !mousePressed && overPanel && size == lastSize)
                         {
-                            float x = NativeFunction.Natives.GET_CONTROL_NORMAL<float>(0, 239) * size.Width;
-                            float y = NativeFunction.Natives.GET_CONTROL_NORMAL<float>(0, 240) * size.Height;
-                            layout.Click(new Point((int)((x - bounds.Left) * InventoryView.Width / bounds.Width),
-                                (int)((y - bounds.Top) * InventoryView.Height / bounds.Height)));
+                            layout.Click(logical);
                             refresh = true;
                         }
                         mousePressed = click;
@@ -228,9 +245,48 @@ namespace ElectroInventory
             return new RectangleF((size.Width - w) / 2, (size.Height - h) / 2, w, h);
         }
 
+        private static void BlockPause()
+        {
+            NativeFunction.Natives.DISABLE_CONTROL_ACTION(0, 199, true);
+            NativeFunction.Natives.DISABLE_CONTROL_ACTION(0, 200, true);
+            NativeFunction.Natives.DISABLE_CONTROL_ACTION(2, 199, true);
+            NativeFunction.Natives.DISABLE_CONTROL_ACTION(2, 200, true);
+        }
+
+        private static void LoadCursor()
+        {
+            string path = Path.Combine(temp, "cursor.png");
+            using (var bitmap = new Bitmap(30, 34))
+            using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+            using (var pen = new Pen(Color.FromArgb(7, 17, 28), 2))
+            using (var fill = new SolidBrush(Color.FromArgb(223, 253, 255)))
+            {
+                var points = new[] { new Point(2, 2), new Point(24, 21), new Point(14, 21),
+                    new Point(18, 29), new Point(13, 32), new Point(9, 23), new Point(2, 29) };
+                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                graphics.FillPolygon(fill, points);
+                graphics.DrawPolygon(pen, points);
+                bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            cursor = Game.CreateTextureFromFile(path);
+            if (cursor == null) throw new IOException("Textura do cursor indisponível.");
+        }
+
         private static void Draw(object sender, Rage.GraphicsEventArgs args)
         {
-            try { lock (RenderLock) if (texture != null) args.Graphics.DrawTexture(texture, destination); }
+            try
+            {
+                lock (RenderLock)
+                {
+                    if (texture == null) return;
+                    args.Graphics.DrawTexture(texture, destination);
+                    if (cursor != null && cursorPosition is PointF point)
+                    {
+                        float scale = Math.Max(.75f, destination.Width / InventoryView.Width);
+                        args.Graphics.DrawTexture(cursor, new RectangleF(point.X - 2 * scale, point.Y - 2 * scale, 30 * scale, 34 * scale));
+                    }
+                }
+            }
             catch (Exception e) { stop = true; Game.LogTrivial("[ElectroInventory] Falha de renderização: " + e.Message); }
         }
 
@@ -240,6 +296,7 @@ namespace ElectroInventory
             {
                 if ((object)texture is IDisposable disposable) disposable.Dispose();
                 texture = null;
+                cursorPosition = null;
             }
         }
 
@@ -248,6 +305,11 @@ namespace ElectroInventory
             stop = true;
             Game.RawFrameRender -= Draw;
             ReleaseTexture();
+            lock (RenderLock)
+            {
+                if ((object)cursor is IDisposable disposable) disposable.Dispose();
+                cursor = null;
+            }
             if (temp == null) return;
             try { Directory.Delete(temp, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             temp = null;

@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Drawing;
 using ElectroInventory.Wire;
 
 internal static class Program
@@ -12,6 +13,7 @@ internal static class Program
 
     private static void Main()
     {
+        CheckOverlayInput();
         var snapshot = new Snapshot { Session = Guid.NewGuid(), Character = 41, Title = "Inventário" };
         var empty = Protocol.Decode(Protocol.Encode(snapshot));
         Require(empty.Rows.Count == 0 && empty.Session == snapshot.Session);
@@ -55,4 +57,28 @@ internal static class Program
         Require(Protocol.Channel(41) != Protocol.Channel(42));
         Console.WriteLine("Protocolo: frações, UTF-8, duplicatas, vazio, truncamento, sessão, expiração e tamanho passaram.");
     }
+    private static void CheckOverlayInput()
+    {
+        var guard = new ElectroInventory.PauseGuard();
+        Require(!guard.Update(false, true)); // GTA owns Esc before opening.
+        Require(guard.Update(true, false));
+        Require(guard.Update(true, true)); // Closing frame.
+        Require(guard.Update(false, true)); // Held after closing.
+        Require(guard.Update(false, false)); // Release frame.
+        Require(!guard.Update(false, false));
+        Require(!guard.Update(false, true)); // Next press belongs to GTA.
+        var logical = new Size(1400, 760);
+        foreach (float scale in new[] { .7f, 1f, 1.75f })
+        {
+            var panel = new RectangleF(250, 100, logical.Width * scale, logical.Height * scale);
+            Require(ElectroInventory.OverlayPointer.TryMap(panel.Left + panel.Width / 2,
+                panel.Top + panel.Height / 2, panel, logical, out Point mapped)
+                && mapped == new Point(700, 380));
+            Require(!ElectroInventory.OverlayPointer.TryMap(panel.Left - .1f, panel.Top, panel, logical, out _));
+            Require(!ElectroInventory.OverlayPointer.TryMap(panel.Right, panel.Bottom, panel, logical, out _));
+        }
+        Require(!ElectroInventory.OverlayPointer.TryMap(float.NaN, 10, RectangleF.Empty, logical, out _));
+        Console.WriteLine("Entrada: Esc pressionado/solto e mapeamento do cursor passaram.");
+    }
+
 }

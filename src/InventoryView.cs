@@ -41,7 +41,7 @@ namespace ElectroInventory
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 Targets.Clear();
-                Box(g, new Rectangle(0, 0, Width, Height), Color.FromArgb(242, 9, 19, 31), Cyan);
+                Box(g, new Rectangle(0, 0, Width, Height), Color.FromArgb(9, 19, 31), Cyan);
                 Line(g, 25, 72, Width - 25, 72, Edge);
                 Text(g, "◇  ELECTROINVENTORY", 29, 20, 480, 33, 21, Cyan, true);
                 Text(g, demo ? "DADOS DEMONSTRATIVOS" : "RC2  /  SOMENTE LEITURA", 810, 25, 300, 32, 16, Pink, true);

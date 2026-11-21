@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net8.0</TargetFramework><OutputType>Exe</OutputType><LangVersion>7.3</LangVersion></PropertyGroup>
-  <ItemGroup><Compile Include="../src/Protocol.cs" Link="Protocol.cs" /></ItemGroup>
+  <ItemGroup>
+    <Compile Include="../src/Protocol.cs" Link="Protocol.cs" />
+    <Compile Include="../src/OverlayInput.cs" Link="OverlayInput.cs" />
+  </ItemGroup>
 </Project>

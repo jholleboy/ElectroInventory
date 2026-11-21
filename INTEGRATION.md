@@ -50,6 +50,23 @@ Payload inclui GUID, handle, modo, bloqueio de entrada, indicador de lista parci
 
 - **Pessoal:** usa nome interno, tradução da RC2, categoria, descrição, fração e propriedades do item. O bloqueio lê menus, telefone, atividade, radial, algemas e VehicleShowcase. O cliente também verifica pausa, fade, cutscene e personagem atual. A entrega não registra I globalmente no Windows.
 - **Imóveis:** leitura dos pontos internos autorizados via `Residence/Business.CreateInventoryMenu`. Só publica recipientes habilitados e aplica a precedência de filtros da RC2. O menu geral de administração do imóvel não abre uma sessão de inspeção. O limite de depósito de dinheiro documentado na auditoria permanece no menu original.
-- **Veículos:** lê enquanto o submenu raiz de armazenamento estiver visível, dentro das regras de acesso do veículo. Itens, armas e dinheiro permanecem grupos distintos. A inspeção fecha ao trocar de submenu ou perder o acesso.
+- **Veículos:** lê no submenu raiz de armazenamento ou em um dos seus três submenus imediatos, dentro das regras de acesso do veículo. Itens, armas e dinheiro permanecem grupos distintos. A inspeção fecha ao sair dos submenus suportados ou ao perder o acesso.
 - **Comércio:** observa `Transaction.Update`, incluindo sessões válidas de NPC. Preço por pacote e disponibilidade são publicados quando a linha genérica fornece os dados. Armas, veículos e serviços aparecem com descrição e orientação ao menu original quando preço final/disponibilidade dependem de estado especializado. Lojas com menus fora de `Transaction`, como roupa e salão, permanecem fora desta inspeção.
 - **Foco:** F10 é um visor passivo de diagnóstico para evitar concorrer com a interface original. Os teclados de paginação do visor são locais ao seu fluxo e não bloqueiam o menu original. A troca de interface e a captura completa de entrada em armazenamento e comércio pertencem à Fase 5.
+
+## Cobertura da inspeção na RC2
+
+| Origem | Publicação |
+| --- | --- |
+| Varejo que usa `GameLocation.StandardInteract` | O loop `ProcessTransactionMenu` chama `Transaction.Update`. Inclui os catálogos padrão de conveniência, bares, restaurantes, barracas, bebidas e penhores quando o local abre uma transação com ofertas. Um balcão ou local sem catálogo ativo não é suficiente. |
+| Drive-thru, máquinas de venda, Ammu-Nation, concessionária, agências de polícia/bombeiros e hospital | Têm caminhos próprios que chamam `ProcessTransactionMenu` para suas transações. Ofertas especializadas ainda podem exigir o menu original para preço final ou disponibilidade. |
+| NPC e comércio de gangue | `PersonTransaction` e a interação comercial de `GangDen` chamam `Update`. Conversa pausada, NPC indisponível, lay-low e confirmação nativa não produzem contexto comercial inspecionável. |
+| Roupa, salão, oficina, jogos, falsificador e bombas de combustível | Menus especializados sem catálogo de `Transaction.Update` no fluxo em questão. Criar um objeto `Transaction` sem chamar o loop comercial não produz uma sessão. Ficam no menu original. |
+| Imóvel | Pontos que usam `Residence/Business.CreateInventoryMenu`; só publica os recipientes permitidos pelo ponto. |
+| Veículo | Menu raiz de armazenamento e submenus imediatos de itens, armas e dinheiro criados para o próprio veículo. Requer o menu original, propriedade ou entrada anterior, veículo válido, velocidade até 0,5, distância 2D até 7 m e jogador vivo/livre. Detalhes mais profundos de uma pilha/arma não estão cobertos. |
+
+F10 aceita uma sessão válida mesmo que a câmera da transação oculte o pedestre. A identidade do pedestre ainda é conferida. O log do cliente diferencia ausência de snapshot, ausência de sessão de comércio/armazenamento e incompatibilidade de tela ou personagem; o produtor registra mudanças de estado comercial com classe do local e motivo, sem nome do jogador, itens, preços ou saldo.
+
+O cursor do GTA continua ativo por frame para fornecer e atualizar os eixos 239/240. O cursor próprio é uma textura desenhada logo após o painel no `RawFrameRender`, somente quando o ponteiro está sobre a área opaca. Fora dela, o GTA desenha seu próprio cursor. O mesmo ponto em pixels alimenta o teste dos cliques. A inspeção passiva deixa o cursor com o menu original.
+
+Ao atualizar no Windows, aplique o patch atualizado a uma cópia limpa da RC2 `ba4115b` (e aplique também V6 se for usar ElectroHud), recompile a RC2 e depois use `BUILD.ps1` e `PACKAGE.ps1` como no README. Instale as DLLs recompiladas.

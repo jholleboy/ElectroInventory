@@ -26,3 +26,10 @@ Para repetir manualmente, use o comando do README e experimente imóvel/veículo
 6. Teste resolução e sobreposições com ElectroHud, captura do cursor por frame e recuperação ao descarregar. Confira que o log não registra textos dos itens nem dados de saldo. Registre versão do jogo/RPH e o caminho em que houve falha.
 
 Foram executados testes independentes do protocolo e análise de sintaxe C# 7.3. A compilação com o SDK oficial e os testes de renderização, entrada e coexistência dentro do jogo continuam pendentes.
+
+### Regressões de cursor, Esc e F10
+
+- Em 1080p, 16:10 e ultrawide, passe o cursor da borda externa até cada canto e centro do painel. Confira um cursor visível, alinhamento de clique, pesquisa, cartões e roda. Troque a resolução com o painel aberto.
+- Feche com Esc e mantenha a tecla pressionada por um segundo. Solte e confira que a pausa fica fechada. Pressione Esc de novo para abrir a pausa normal. Repita com a pesquisa ativa, fechamento com I e controle conectado.
+- Abra F10 em balcão normal, comércio com câmera que esconde o personagem, NPC e menu especializado sem catálogo. Compare os diagnósticos do cliente e de `Transaction.Update`. Repita com o menu original em confirmação.
+- Entre no armazenamento de um veículo e alterne raiz, itens, armas e dinheiro. Saia do menu, mova o veículo e afaste-se. A inspeção deve acompanhar somente o contexto legítimo. Repita com ElectroHud V6 e confira que o menu original segue operável.
