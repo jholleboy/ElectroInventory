@@ -89,14 +89,18 @@ try {
     & dotnet run --project (Join-Path $inventory 'tests\ProtocolTests.csproj') --configuration Release
     if ($LASTEXITCODE -ne 0) { throw 'Testes automatizados falharam.' }
 
-    $package = @{
-        Version = $Version; InventoryCommit = $inventorySha; Rc2Commit = $rc2Sha
-        HudCommit = $hudSha; UpstreamCommit = $upstreamSha; InventoryRoot = $inventory
-        Rc2Build = (Join-Path $rc2 'artifacts\ptbr\build\Legacy')
-    }
-    $stage = 'Validar DLLs, catalogo PT-BR e integridade do ZIP local'
+    $stage = 'Validar DLLs, catalogo PT-BR e ZIP em processo limpo do Windows PowerShell 5.1'
     Write-Host "[BUILD] $stage"
-    & (Join-Path $PSScriptRoot 'PACKAGE_FULL.ps1') @package
+    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $packageArgs = @(
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-File', (Join-Path $PSScriptRoot 'PACKAGE_FULL.ps1')
+        '-Version', $Version, '-InventoryCommit', $inventorySha, '-Rc2Commit', $rc2Sha
+        '-HudCommit', $hudSha, '-UpstreamCommit', $upstreamSha, '-InventoryRoot', $inventory
+        '-Rc2Build', (Join-Path $rc2 'artifacts\ptbr\build\Legacy'), '-RequireWindowsPowerShell51'
+    )
+    # Run the production packager as the regression test on the actual Release x64 outputs.
+    & $windowsPowerShell @packageArgs
+    if ($LASTEXITCODE -ne 0) { throw "Empacotamento isolado falhou ($LASTEXITCODE)." }
     Write-Host '[BUILD] PASSOU: Release x64, testes e verificacao do ZIP local.'
 }
 catch {

@@ -21,3 +21,7 @@ Se for preciso depurar o job localmente, use um checkout **descartável e limpo*
 Em **Actions → ElectroInventory Legacy release → Run workflow**, escolha **main** e mantenha **build_only** marcado (padrão). A versão serve apenas para identificar esse build local. O runner executa a mesma compilação, os testes e a verificação das DLLs, do catálogo e do ZIP. O resumo mostra o resultado; abra o log do build para ver cada etapa ou a etapa da falha.
 
 O modo privado requer o runner dedicado `electroinventory-release`, o SDK oficial e as variáveis de build documentadas acima. Ele dispensa `LSR_REDISTRIBUTION_APPROVED` e `release-publish`. O ZIP fica no runner, sem upload, tag ou release. Para a publicação autorizada, desmarque **build_only** ao disparar manualmente ou envie a tag aprovada.
+
+### Regressão do empacotador no Windows PowerShell 5.1
+
+O build executa `PACKAGE_FULL.ps1` sobre as saídas reais em um novo `powershell.exe -NoProfile -NonInteractive` e exige a versão 5.1. O teste é o próprio empacotamento completo: confere DLLs x64, catálogo, SHA-256 e o conteúdo reaberto do ZIP. Um erro no processo filho interrompe o build antes de qualquer upload. No .NET Framework, os tipos de ZIP exigem `System.IO.Compression` e `System.IO.Compression.FileSystem`; os demais tipos usados vêm das bibliotecas base ou dos recursos nativos do PowerShell.

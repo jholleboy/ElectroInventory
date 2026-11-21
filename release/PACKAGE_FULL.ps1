@@ -6,9 +6,19 @@ param(
     [Parameter(Mandatory)][string]$HudCommit,
     [Parameter(Mandatory)][string]$UpstreamCommit,
     [Parameter(Mandatory)][string]$InventoryRoot,
-    [Parameter(Mandatory)][string]$Rc2Build
+    [Parameter(Mandatory)][string]$Rc2Build,
+    [switch]$RequireWindowsPowerShell51
 )
 $ErrorActionPreference = 'Stop'
+if ($RequireWindowsPowerShell51) {
+    if ($PSVersionTable.PSEdition -ne 'Desktop' -or
+        $PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+        throw 'O teste de empacotamento exige Windows PowerShell 5.1.'
+    }
+    Write-Host "[PACKAGE] Processo limpo: Windows PowerShell $($PSVersionTable.PSVersion)"
+}
+# ZipArchiveMode is defined in Compression; ZipFile and ZipFileExtensions are in FileSystem on .NET Framework.
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 function Hash-File([string]$Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
