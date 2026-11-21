@@ -106,6 +106,11 @@ namespace ElectroInventory
                 Result = ActionResult.Accepted;
                 return true;
             }
+            catch (Exception error) when (error is IOException || error is UnauthorizedAccessException)
+            {
+                Result = ActionResult.Uncertain;
+                return false;
+            }
             finally { mutex.ReleaseMutex(); }
         }
 

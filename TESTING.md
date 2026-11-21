@@ -33,3 +33,15 @@ Foram executados testes independentes do protocolo e análise de sintaxe C# 7.3.
 - Feche com Esc e mantenha a tecla pressionada por um segundo. Solte e confira que a pausa fica fechada. Pressione Esc de novo para abrir a pausa normal. Repita com a pesquisa ativa, fechamento com I e controle conectado.
 - Abra F10 em balcão normal, comércio com câmera que esconde o personagem, NPC e menu especializado sem catálogo. Compare os diagnósticos do cliente e de `Transaction.Update`. Repita com o menu original em confirmação.
 - Entre no armazenamento de um veículo e alterne raiz, itens, armas e dinheiro. Saia do menu, mova o veículo e afaste-se. A inspeção deve acompanhar somente o contexto legítimo. Repita com ElectroHud V6 e confira que o menu original segue operável.
+
+## Candidato interativo
+
+Testes de console em `tests/ProtocolTests.csproj`: sessão ou revisão errada, token diferente, ação não autorizada ou composta, quantidade inválida, descarte e limpeza da confirmação ao mudar revisão, saldo e overflow de preço, preservação da fração, regressões do canal v1 e dos controles de Esc/cursor. O teste de revisão aposentada cobre o predicado que bloqueia um comando repetido. A execução do servidor sobre memória mapeada, efeitos da RC2 e ciclo completo no jogo requerem Windows.
+
+Rodada final em save de teste:
+
+1. Aplique o patch de ações, e opcionalmente ElectroHud V6, sobre `ba4115b` limpo. Compile a RC2 e o ElectroInventory com SDK oficial. Compare o cliente novo primeiro contra o patch antigo para verificar o fallback somente leitura.
+2. Use comida, bebida e colete. Ative lanterna e binóculos. Confira seleção obsoleta, cancelamento, quantidades de descarte, troca de personagem no meio da animação, reabertura do inventário e valores finais.
+3. Transfira unidades inteiras em um ponto sem animação com saldo fracionário. Compare ambas as pilhas. Teste restrição de tipo, menu fechado, veículo que se afasta e armazenamento com animação. Confira que armas e dinheiro seguem visíveis em leitura.
+4. Compre e venda em transação genérica. Compare preço, dinheiro, estoque, unidade/pacote e saldo. Tente dois cliques rápidos e teste oferta sem estoque, mudança de preço e débito insuficiente. Verifique NPCs e lojas especializadas pelo menu original.
+5. Confira F10 e Ctrl+F3 em menus originais, prioridade dos atalhos, troca de sessão, fechamento com I/Esc, cursor e coexistência com ElectroHud V6. Faça uma operação, salve pelo fluxo original e confira o estado após recarregar.

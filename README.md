@@ -29,9 +29,9 @@ O cabeçalho marca os dados demonstrativos. As abas permitem experimentar invent
 - `prototype/app.js` trata navegação e solicitações locais de simulação.
 - `prototype/icons.js` e `settings.js` definem ícones e opções visuais.
 
-O protótipo web continua disponível para comparação visual. A Fase 4 depende de aprovação.
+O protótipo web continua disponível para comparação visual.
 
-## Fase 3 — plugin dentro do jogo
+## Plugin e candidato interativo para GTA V
 
 No Windows, instale o Developer Pack .NET Framework 4.8, Visual Studio Build Tools com MSBuild e o RAGE Plugin Hook compatível com GTA V Legacy. Coloque o SDK oficial em `<GTA V>\SDK\RagePluginHookSDK.dll`. Em PowerShell:
 
@@ -40,8 +40,10 @@ No Windows, instale o Developer Pack .NET Framework 4.8, Visual Studio Build Too
 .\PACKAGE.ps1
 ```
 
-Extraia `artifacts\ElectroInventory-Legacy.zip` na raiz do GTA V. O ZIP instala `Plugins\ElectroInventory.dll` e `Plugins\ElectroInventory\Settings.xml`. O patch da RC2 é distribuído separadamente dentro do ZIP e precisa ser aplicado e compilado no checkout da RC2. Use uma cópia limpa de `ba4115b`. [Instruções de integração](INTEGRATION.md)
+Extraia `artifacts\ElectroInventory-Legacy.zip` na raiz do GTA V. O ZIP instala `Plugins\ElectroInventory.dll` e `Plugins\ElectroInventory\Settings.xml`. O ZIP contém os patches. Para habilitar ações, aplique apenas `LosSantosRED-ba4115b-electroinventory-actions-v2.patch` a uma cópia limpa da RC2 em `ba4115b` e recompile essa cópia. O patch de leitura original continua disponível como alternativa. [Instruções de integração](INTEGRATION.md)
 
 Carregue a RC2 integrada e o ElectroInventory em modo história. **I** abre/fecha o inventário pessoal quando a entrada estiver livre; **Esc** sai da pesquisa ou fecha a interface. Use **/** para pesquisar, setas ou mouse para selecionar, e PgUp/PgDn ou roda para paginar. **F10** abre/fecha a inspeção passiva de armazenamento ou comércio durante um menu compatível da RC2. Ctrl+F7/F8 pagina e Ctrl+F6 alterna o lado do armazenamento. Configure as duas teclas de abertura em `Settings.xml` se houver conflito.
 
-`Live` usa dados da ponte ou indica indisponibilidade no log e mantém a tela fechada. `Demo` é um modo explícito de tela pessoal com um item fictício. Para a demonstração completa, use o protótipo web. A Fase 3 não habilita transações nem troca menus do jogo.
+`Live` usa dados da ponte ou indica indisponibilidade no log e mantém a tela fechada. `Demo` é um modo explícito de tela pessoal com um item fictício. Para a demonstração completa, use o protótipo web. Com a ponte de ações, os botões aparecem somente para a seleção autorizada pelo LS RED. Nos modos passivos, Ctrl+↑/↓ seleciona, Ctrl+←/→ ajusta a quantidade, Ctrl+F4 alterna a ação, Ctrl+F3 abre e confirma a solicitação, e Ctrl+F5 cancela a confirmação local. Os menus nativos continuam operáveis. Com o patch somente leitura, o mesmo plugin funciona sem botões ativos.
+
+A versão é candidata a testes. Confira as restrições por operação e o roteiro integrado antes de usar a ponte com um save principal. [Cobertura e contrato](INTEGRATION.md) · [Testes](TESTING.md)

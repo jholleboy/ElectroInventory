@@ -90,8 +90,8 @@ namespace ElectroInventory
                 DrawDetail(g, count == 0 ? null : active[nav.Selected]);
                 DrawActions(g, action, result, busy, passive);
                 Line(g, 25, 704, Width - 25, 704, Edge);
-                Text(g, passive ? "F10 fecha  ·  Ctrl+F6 troca lado  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F4 ação  ·  Ctrl+Enter confirma  ·  Ctrl+F5 cancela" :
-                    "Setas / mouse  Navegar     •     PgUp / PgDn / roda  Página     •     /  Pesquisar     •     I / Esc  Fechar",
+                Text(g, passive ? "F10 fecha  ·  Ctrl+F6 troca lado  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F4 ação  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela" :
+                    "Setas/mouse  Navegar  ·  PgUp/PgDn/roda  Página  ·  /  Pesquisar  ·  Ctrl+F4  Ação  ·  Ctrl+F3  Confirmar  ·  I/Esc  Fechar",
                     28, 718, 1150, 27, 16, Muted, false);
                 if (snapshot.Incomplete) Text(g, "Lista parcial", 1230, 718, 145, 27, 16, Pink, true);
             }

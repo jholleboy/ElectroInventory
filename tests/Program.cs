@@ -14,6 +14,7 @@ internal static class Program
     private static void Main()
     {
         CheckOverlayInput();
+        CheckActions();
         var snapshot = new Snapshot { Session = Guid.NewGuid(), Character = 41, Title = "Inventário" };
         var empty = Protocol.Decode(Protocol.Encode(snapshot));
         Require(empty.Rows.Count == 0 && empty.Session == snapshot.Session);
@@ -57,6 +58,49 @@ internal static class Program
         Require(Protocol.Channel(41) != Protocol.Channel(42));
         Console.WriteLine("Protocolo: frações, UTF-8, duplicatas, vazio, truncamento, sessão, expiração e tamanho passaram.");
     }
+    private static void CheckActions()
+    {
+        Guid session = Guid.NewGuid(), revision = Guid.NewGuid(), nextRevision = Guid.NewGuid();
+        var offer = new ActionOffer { Token = Guid.NewGuid(), Kinds = ActionKind.Use | ActionKind.Discard, Maximum = 7 };
+        var command = new ActionCommand { Id = Guid.NewGuid(), Token = offer.Token, Session = session,
+            Revision = revision, Kind = ActionKind.Discard, Quantity = 5 };
+        Require(ActionProtocol.Authorize(command, session, revision, offer));
+        Require(!ActionProtocol.Authorize(command, session, nextRevision, offer)); // revision retired before execution
+        Require(!ActionProtocol.Authorize(command, Guid.NewGuid(), revision, offer));
+        command.Kind = ActionKind.Use | ActionKind.Discard;
+        Require(!ActionProtocol.Authorize(command, session, revision, offer));
+        command.Kind = ActionKind.Buy;
+        Require(!ActionProtocol.Authorize(command, session, revision, offer));
+        command.Kind = ActionKind.Use;
+        Require(!ActionProtocol.Authorize(command, session, revision, offer));
+        command.Quantity = 1;
+        Require(ActionProtocol.Authorize(command, session, revision, offer));
+        command.Token = Guid.NewGuid();
+        Require(!ActionProtocol.Authorize(command, session, revision, offer));
+        command.Token = offer.Token;
+        command.Quantity = -1;
+        Require(!ActionProtocol.Authorize(command, session, revision, offer));
+        Require(ActionProtocol.ExactTransfer(3.25f, 1.125f, 2));
+        Require(!ActionProtocol.ExactTransfer(.75f, 1, 1));
+        Require(!ActionProtocol.ExactTransfer(3, 16777216, 1));
+        Require(!ActionProtocol.ExactTransfer(float.NaN, 0, 1));
+        Require(ActionProtocol.ValidPrice(5, 2, 10, true));
+        Require(!ActionProtocol.ValidPrice(5, 3, 10, true));
+        Require(!ActionProtocol.ValidPrice(int.MaxValue, 2, 1, false));
+        var selection = new ElectroInventory.ActionSelection();
+        selection.Bind(revision, offer);
+        Require(selection.Kind == ActionKind.Use);
+        selection.NextKind();
+        selection.Adjust(1);
+        Require(selection.Kind == ActionKind.Discard && selection.Quantity == 5);
+        selection.Adjust(1);
+        Require(selection.Quantity == 7);
+        selection.Confirming = true;
+        selection.Bind(nextRevision, offer);
+        Require(!selection.Confirming && selection.Quantity == 1);
+        Console.WriteLine("Ações: autorização, revisão aposentada, sessão, token, frações, preço e confirmação passaram.");
+    }
+
     private static void CheckOverlayInput()
     {
         var guard = new ElectroInventory.PauseGuard();

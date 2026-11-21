@@ -171,7 +171,8 @@ namespace ElectroInventory
                     RectangleF bounds = Fit(size);
                     if (!passive)
                     {
-                        refresh |= Navigate(nav, edges, toggle, togglePressed, escape);
+                        if (nav.Search || !Game.IsKeyDownRightNow(Keys.LControlKey))
+                            refresh |= Navigate(nav, edges, toggle, togglePressed, escape);
                         // Frame-local controls expire automatically when the overlay closes.
                         foreach (int control in OverlayControls)
                             NativeFunction.Natives.DISABLE_CONTROL_ACTION(0, control, true);
@@ -201,7 +202,7 @@ namespace ElectroInventory
                     var token = selection.Offer?.Token;
                     selection.Bind(lastRevision, offer);
                     refresh |= token != selection.Offer?.Token;
-                    if (passive && Game.IsKeyDownRightNow(Keys.LControlKey))
+                    if (!nav.Search && Game.IsKeyDownRightNow(Keys.LControlKey))
                     {
                         if (Pressed(Keys.Up, edges)) { nav.Selected = Math.Max(0, nav.Selected - 1); refresh = true; }
                         if (Pressed(Keys.Down, edges)) { nav.Selected++; refresh = true; }
@@ -209,7 +210,7 @@ namespace ElectroInventory
                         if (Pressed(Keys.Right, edges)) { selection.Adjust(1); refresh = true; }
                         if (Pressed(Keys.F5, edges)) { selection.Confirming = false; refresh = true; }
                         if (Pressed(Keys.F4, edges)) { selection.NextKind(); refresh = true; }
-                        if (Pressed(Keys.Enter, edges) && offer != null && actions?.Busy == false)
+                        if (Pressed(Keys.F3, edges) && offer != null && actions?.Busy == false)
                         { layout.ActionRequested = true; refresh = true; }
                         // Never carry a confirmation to a different row.
                         if (refresh && items.Count > 0 && row != sample.Rows.IndexOf(items[Math.Min(items.Count - 1, Math.Max(0, nav.Selected))]))
@@ -222,8 +223,8 @@ namespace ElectroInventory
                         {
                             if (selection.Confirming)
                             {
-                                if (actions.Submit(sample.Session, selection.Revision, offer, selection.Kind, selection.Quantity))
-                                    selection.Confirming = false;
+                                actions.Submit(sample.Session, selection.Revision, offer, selection.Kind, selection.Quantity);
+                                selection.Confirming = false;
                             }
                             else selection.Confirming = true;
                         }
