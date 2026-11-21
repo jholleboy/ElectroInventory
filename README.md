@@ -47,3 +47,7 @@ Carregue a RC2 integrada e o ElectroInventory em modo história. **I** abre/fech
 `Live` usa dados da ponte ou indica indisponibilidade no log e mantém a tela fechada. `Demo` é um modo explícito de tela pessoal com um item fictício. Para a demonstração completa, use o protótipo web. Com a ponte de ações, os botões aparecem somente para a seleção autorizada pelo LS RED. Nos modos passivos, Ctrl+↑/↓ seleciona, Ctrl+←/→ ajusta a quantidade, Ctrl+F4 alterna a ação, Ctrl+F3 abre e confirma a solicitação, e Ctrl+F5 cancela a confirmação local. Os menus nativos continuam operáveis. Com o patch somente leitura, o mesmo plugin funciona sem botões ativos.
 
 A versão é candidata a testes. Confira as restrições por operação e o roteiro integrado antes de usar a ponte com um save principal. [Cobertura e contrato](INTEGRATION.md) · [Testes](TESTING.md)
+
+## Releases automáticas
+
+A pipeline integrada usa um runner Windows com dependências oficiais e publica candidatas verificadas quando a distribuição estiver autorizada. [Configuração para mantenedores](release/README.md) · [Instalação e rollback](release/INSTALL.md)
