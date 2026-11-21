@@ -205,6 +205,20 @@ internal static class Program
         Require(!ElectroInventory.OverlaySession.Matches(session, session, 41, 42, true, false));
         Require(!ElectroInventory.OverlaySession.Matches(session, session, 41, 41, false, false));
         Require(ElectroInventory.OverlaySession.CloseRequested(true, false, true, false, false, false, false));
+        var requestedTrade = Guid.NewGuid();
+        Require(ElectroInventory.OverlaySession.HasNewTradeOpen(true, requestedTrade, Guid.Empty));
+        Require(!ElectroInventory.OverlaySession.HasNewTradeOpen(true, requestedTrade, requestedTrade));
+        Require(!ElectroInventory.OverlaySession.HasNewTradeOpen(false, requestedTrade, Guid.Empty));
+        Require(ElectroInventory.OverlaySession.CanOpenPersonal(true, 0, false, true, false));
+        Require(!ElectroInventory.OverlaySession.CanOpenPersonal(true, 1, false, true, false));
+        Require(!ElectroInventory.OverlaySession.CanOpenPersonal(true, 2, false, true, false));
+        Require(!ElectroInventory.OverlaySession.CanOpenPersonal(true, 0, true, true, false));
+        Require(!ElectroInventory.OverlaySession.CanOpenPersonal(true, 0, false, false, false));
+        Require(!ElectroInventory.OverlaySession.CanOpenPersonal(true, 0, false, true, true));
+        Require(ElectroInventory.OverlaySession.CloseRequested(false, true, false, true, false, false, false));
+        Require(!ElectroInventory.OverlaySession.CloseRequested(false, true, false, true, false, true, false));
+        Require(!ElectroInventory.OverlaySession.CloseRequested(true, true, false, true, false, false, false));
+        Require(!ElectroInventory.OverlaySession.CloseRequested(true, true, true, false, false, true, false));
         Require(!ElectroInventory.OverlaySession.CloseRequested(true, false, false, false, true, false, false));
         Require(ElectroInventory.OverlaySession.CloseRequested(true, true, false, false, true, false, false));
         Require(!ElectroInventory.OverlaySession.CloseRequested(true, true, false, false, true, true, false));
@@ -227,7 +241,7 @@ internal static class Program
         Require(ElectroInventory.TradeTabs.Total(row, null, 1) == null);
         Require(ActionProtocol.ExactTransfer(5.25f, 2.5f, 3));
         Require(!ActionProtocol.ExactTransfer(2.25f, 2.5f, 3));
-        Console.WriteLine("V3: sessões, F10/Esc, personagem, diferentes proporções e totais passaram.");
+        Console.WriteLine("V3: sessões, atalhos/Esc, personagem, diferentes proporções e totais passaram.");
     }
 
     private sealed class MenuNode

@@ -95,8 +95,11 @@ namespace ElectroInventory
             return categories;
         }
 
-        public Bitmap Make(Snapshot snapshot, Navigation nav, bool demo, bool ownsInput, ActionSelection action, ActionResult result, bool busy, bool gearAvailable, int balanceSource)
+        public Bitmap Make(Snapshot snapshot, Navigation nav, bool demo, bool ownsInput, ActionSelection action, ActionResult result, bool busy, bool gearAvailable, int balanceSource, string toggleKey, string inspectKey)
         {
+            string contextClose = ownsInput
+                ? (inspectKey == null ? "Esc" : inspectKey + "/Esc") + " fecha"
+                : (inspectKey == null ? "Feche pelo menu original" : inspectKey + " fecha");
             var image = new Bitmap(Width, Height);
             using (var g = Graphics.FromImage(image))
             {
@@ -131,7 +134,7 @@ namespace ElectroInventory
                 var categories = Categories(snapshot, nav);
                 if (nav.CategoryOffset >= categories.Count) nav.CategoryOffset = 0;
                 if (snapshot.Mode != 0)
-                    Text(g, ownsInput ? "MOUSE E TECLADO" : "MODO PASSIVO · F10 FECHA",
+                    Text(g, ownsInput ? "MOUSE E TECLADO" : "MODO PASSIVO",
                         1045, 26, 205, 30, 14, ownsInput ? Cyan : Muted, true);
                 var active = Items(snapshot, nav, nav.Right);
                 int count = active.Count;
@@ -170,9 +173,9 @@ namespace ElectroInventory
                 else DrawActions(g, action, result, busy, passive, snapshot.Mode, row);
                 Line(g, 25, 704, Width - 25, 704, Edge);
                 Text(g, snapshot.Mode == 2
-                    ? "F10 fecha  ·  Clique ou Ctrl+F2 Comprar/Vender  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela"
-                    : passive ? "F10 fecha  ·  Ctrl+F6 troca lado  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F4 ação  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela" :
-                    "Setas/mouse  Navegar  ·  PgUp/PgDn/roda  Página  ·  /  Pesquisar  ·  Home/End  Filtro  ·  Ctrl+F4  Ação  ·  Ctrl+F3  Confirmar  ·  Tecla Menu  Ações  ·  I/Esc  Fechar",
+                    ? contextClose + "  ·  Clique ou Ctrl+F2 Comprar/Vender  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela"
+                    : passive ? contextClose + "  ·  Ctrl+F6 troca lado  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F4 ação  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela" :
+                    "Setas/mouse  Navegar  ·  PgUp/PgDn/roda  Página  ·  /  Pesquisar  ·  Home/End  Filtro  ·  Ctrl+F4  Ação  ·  Ctrl+F3  Confirmar  ·  Tecla Menu  Ações  ·  " + toggleKey + "/Esc  Fechar",
                     28, 718, 1150, 27, 16, Muted, false);
                 if (snapshot.Incomplete) Text(g, "Lista parcial", 1230, 718, 145, 27, 16, Pink, true);
                 if (ContextOpen && ownsInput && row != null) DrawContext(g, action, busy);

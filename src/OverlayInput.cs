@@ -11,9 +11,16 @@ namespace ElectroInventory
             available && openSession != Guid.Empty && openSession == snapshotSession &&
             (demo || (currentCharacter != 0 && snapshotCharacter == currentCharacter));
 
+        public static bool CanOpenPersonal(bool togglePressed, byte mode, bool blocksInput,
+            bool visible, bool escapeDown) =>
+            togglePressed && mode == 0 && !blocksInput && visible && !escapeDown;
+
+        public static bool HasNewTradeOpen(bool available, Guid requested, Guid handled) =>
+            available && requested != Guid.Empty && requested != handled;
+
         public static bool CloseRequested(bool contextual, bool ownsInput, bool inspectPressed,
             bool togglePressed, bool escapePressed, bool searching, bool closeButton) =>
-            (contextual && inspectPressed) || (ownsInput && (closeButton || (escapePressed && !searching))) ||
+            (contextual && inspectPressed && !searching) || (ownsInput && (closeButton || (escapePressed && !searching))) ||
             (!contextual && togglePressed && !searching);
     }
 

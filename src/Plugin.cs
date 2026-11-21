@@ -22,7 +22,7 @@ namespace ElectroInventory
         public bool ItemImages { get; set; } = true;
         public string Mode { get; set; } = "Live";
         public string ToggleKey { get; set; } = "I";
-        public string InspectKey { get; set; } = "F10";
+        public string InspectKey { get; set; } = "F7";
         internal static Settings Read()
         {
             string path = Path.Combine("Plugins", "ElectroInventory", "Settings.xml");
@@ -86,8 +86,9 @@ namespace ElectroInventory
             bool ownsInput = false;
             Guid releaseSession = Guid.Empty;
             LoadCursor();
-            Keys toggle = Parse(config.ToggleKey, Keys.I);
-            Keys inspect = Parse(config.InspectKey, Keys.F10);
+            Keys toggle = ParseShortcut(config.ToggleKey, Keys.I);
+            Keys inspect = ParseShortcut(config.InspectKey, Keys.F7);
+            var inspectEdges = new HashSet<Keys>();
             if (inspect == toggle) log("Inspeção desativada: InspectKey e ToggleKey são iguais.");
             bool open = false, passive = false, conflictLogged = false;
             Snapshot sample = null;
@@ -137,10 +138,14 @@ namespace ElectroInventory
                         nextRead = 0;
                     lastResult = resultNow;
                 }
+                bool modified = Game.IsKeyDownRightNow(Keys.LControlKey) || Game.IsKeyDownRightNow(Keys.RControlKey)
+                    || Game.IsKeyDownRightNow(Keys.LMenu) || Game.IsKeyDownRightNow(Keys.RMenu)
+                    || Game.IsKeyDownRightNow(Keys.LShiftKey) || Game.IsKeyDownRightNow(Keys.RShiftKey);
                 bool togglePressed = Pressed(toggle, edges);
-                bool inspectPressed = inspect != toggle && Pressed(inspect, edges);
+                bool inspectPressed = inspect != toggle && Pressed(inspect, inspectEdges) && !modified;
                 bool escape = Pressed(Keys.Escape, edges);
-                bool blocked = NativeFunction.Natives.IS_PAUSE_MENU_ACTIVE<bool>() || NativeFunction.Natives.IS_CUTSCENE_ACTIVE<bool>()
+                bool textInput = NativeFunction.Natives.UPDATE_ONSCREEN_KEYBOARD<int>() == 0;
+                bool blocked = textInput || NativeFunction.Natives.IS_PAUSE_MENU_ACTIVE<bool>() || NativeFunction.Natives.IS_CUTSCENE_ACTIVE<bool>()
                     || NativeFunction.Natives.IS_SCREEN_FADED_OUT<bool>()
                     || NativeFunction.Natives.IS_SCREEN_FADING_OUT<bool>();
                 var ped = Game.LocalPlayer.Character;
@@ -154,9 +159,9 @@ namespace ElectroInventory
                 }
                 bool nativeTrade = sample?.Mode == 2 && actions?.NativeTradeOnly(sample.Session) == true;
                 var requestedTrade = sample?.Mode == 2 ? actions?.TradeOpen ?? Guid.Empty : Guid.Empty;
-                bool autoTrade = available && requestedTrade != Guid.Empty && requestedTrade != handledTradeOpen;
+                bool autoTrade = OverlaySession.HasNewTradeOpen(available, requestedTrade, handledTradeOpen);
                 if (autoTrade) handledTradeOpen = requestedTrade;
-                if (nativeTrade && (open || inspectPressed || autoTrade))
+                if (nativeTrade && (open || (available && inspectPressed) || autoTrade))
                 {
                     if (open) { open = false; ReleaseTexture(); }
                     Game.DisplayHelp("Esta negociação usa o menu original do Los Santos RED.");
@@ -175,13 +180,14 @@ namespace ElectroInventory
                     refresh = true;
                 }
                 if (open && OverlaySession.CloseRequested(passive, ownsInput, inspectPressed,
-                    togglePressed, escape, nav.Search, layout.CloseRequested))
+                    togglePressed && !modified, escape, nav.Search, layout.CloseRequested))
                 {
                     open = false;
                     ReleaseTexture();
                 }
-                else if (!open && available && sample != null &&
-                    ((togglePressed && ped.IsVisible && sample.Mode == 0 && !sample.BlocksInput && !escapeDown) || ((inspectPressed || autoTrade) && sample.Mode != 0)))
+                else if (available && ((!open && OverlaySession.CanOpenPersonal(togglePressed && !modified,
+                    sample.Mode, sample.BlocksInput, ped.IsVisible, escapeDown)) ||
+                    (sample.Mode != 0 && (autoTrade || (!open && inspectPressed)))))
                 {
                     open = true;
                     passive = sample.Mode != 0;
@@ -365,7 +371,7 @@ namespace ElectroInventory
                     if (size != lastSize || refresh)
                     {
                         string path = Path.Combine(temp, "page-" + revision++ + ".png");
-                        using (var bitmap = layout.Make(displayed, nav, demo, ownsInput, selection, actions?.Result ?? ActionResult.None, actions?.Busy == true, gear != null, actions?.TradeBalance ?? 0)) bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                        using (var bitmap = layout.Make(displayed, nav, demo, ownsInput, selection, actions?.Result ?? ActionResult.None, actions?.Busy == true, gear != null, actions?.TradeBalance ?? 0, toggle.ToString(), inspect != toggle ? inspect.ToString() : null)) bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
                         var next = Game.CreateTextureFromFile(path);
                         if (next == null) throw new IOException("Textura da interface indisponível.");
                         try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
@@ -382,8 +388,8 @@ namespace ElectroInventory
             }
         }
 
-        private static Keys Parse(string value, Keys fallback) =>
-            Enum.TryParse(value, true, out Keys key) && Enum.IsDefined(typeof(Keys), key) && key != Keys.None ? key : fallback;
+        private static Keys ParseShortcut(string value, Keys fallback) =>
+            Enum.TryParse(value, true, out Keys key) && Enum.IsDefined(typeof(Keys), key) && key != Keys.None && key != Keys.F10 && key != Keys.Escape ? key : fallback;
 
         private static bool Pressed(Keys key, HashSet<Keys> edges)
         {
