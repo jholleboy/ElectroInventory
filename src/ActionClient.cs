@@ -44,7 +44,7 @@ namespace ElectroInventory
                     if (Busy && ActionProtocol.ReadGuid(view, 40) == pending)
                     {
                         var result = (ActionResult)view.ReadByte(56);
-                        if (result >= ActionResult.Success && result <= ActionResult.Cancelled)
+                        if (result >= ActionResult.Success && result <= ActionResult.Started)
                         { Result = result; pending = Guid.Empty; }
                     }
                     if (Busy && now - sent > Stopwatch.Frequency * 8)

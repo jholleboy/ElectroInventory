@@ -59,17 +59,21 @@ namespace ElectroInventory
                 using (var process = Process.GetCurrentProcess()) pid = process.Id;
                 using (IDataSource source = demo ? (IDataSource)new DemoDataSource() : new LsrReadOnlyDataSource(pid, log))
                 using (IDataSource unavailable = new UnavailableDataSource())
-                    Run(source, unavailable, config, demo, log);
+                using (var actions = demo ? null : new ActionClient(pid))
+                    Run(source, unavailable, actions, config, demo, log);
             }
             catch (ThreadAbortException) { throw; }
             catch (Exception e) { Game.LogTrivial("[ElectroInventory] Falha: " + e.GetType().Name + " " + e.Message); }
             finally { Finally(); }
         }
 
-        private static void Run(IDataSource source, IDataSource unavailable, Settings config, bool demo, Action<string> log)
+        private static void Run(IDataSource source, IDataSource unavailable, ActionClient actions, Settings config, bool demo, Action<string> log)
         {
             var layout = new InventoryView();
             var nav = new Navigation();
+            var selection = new ActionSelection();
+            ActionResult lastResult = ActionResult.None;
+            Guid lastRevision = Guid.Empty;
             var edges = new HashSet<Keys>();
             var pauseGuard = new PauseGuard();
             LoadCursor();
@@ -101,6 +105,12 @@ namespace ElectroInventory
                         sample = next;
                     }
                     else refresh = false;
+                    actions?.Poll(sample?.PublicationStamp ?? 0, sample?.Rows.Count ?? 0);
+                    var revisionNow = actions?.Revision ?? Guid.Empty;
+                    var resultNow = actions?.Result ?? ActionResult.None;
+                    refresh |= revisionNow != lastRevision || resultNow != lastResult;
+                    lastRevision = revisionNow;
+                    lastResult = resultNow;
                 }
                 bool togglePressed = Pressed(toggle, edges);
                 bool inspectPressed = inspect != toggle && Pressed(inspect, edges);
@@ -115,6 +125,12 @@ namespace ElectroInventory
                     open = false;
                     ReleaseTexture();
                 }
+                if (open && !passive && escape && selection.Confirming)
+                {
+                    selection.Confirming = false;
+                    escape = false;
+                    refresh = true;
+                }
                 if (open && ((passive && inspectPressed) || (!passive && (layout.CloseRequested ||
                     (escape && !nav.Search) || (togglePressed && !nav.Search)))))
                 {
@@ -128,6 +144,7 @@ namespace ElectroInventory
                     passive = sample.Mode != 0;
                     session = sample.Session;
                     nav.Reset();
+                    selection.Bind(Guid.Empty, null);
                     layout.CloseRequested = false;
                     refresh = true;
                     if (!passive) BlockPause();
@@ -176,10 +193,44 @@ namespace ElectroInventory
                         if (Pressed(Keys.F8, edges)) { nav.Selected += InventoryView.Page; refresh = true; }
                         if (Pressed(Keys.F6, edges) && sample.Mode == 1) { nav.Right = !nav.Right; nav.Selected = 0; refresh = true; }
                     }
+                    var items = InventoryView.Items(sample, nav, nav.Right);
+                    int row = items.Count == 0 ? -1 : sample.Rows.IndexOf(items[Math.Min(items.Count - 1, Math.Max(0, nav.Selected))]);
+                    var offer = actions != null && row >= 0 && row < actions.Offers.Length ? actions.Offers[row] : null;
+                    var token = selection.Offer?.Token;
+                    selection.Bind(lastRevision, offer);
+                    refresh |= token != selection.Offer?.Token;
+                    if (passive && Game.IsKeyDownRightNow(Keys.LControlKey))
+                    {
+                        if (Pressed(Keys.Up, edges)) { nav.Selected = Math.Max(0, nav.Selected - 1); refresh = true; }
+                        if (Pressed(Keys.Down, edges)) { nav.Selected++; refresh = true; }
+                        if (Pressed(Keys.Left, edges)) { selection.Adjust(-1); refresh = true; }
+                        if (Pressed(Keys.Right, edges)) { selection.Adjust(1); refresh = true; }
+                        if (Pressed(Keys.F5, edges)) { selection.Confirming = false; refresh = true; }
+                        if (Pressed(Keys.F4, edges)) { selection.NextKind(); refresh = true; }
+                        if (Pressed(Keys.Enter, edges) && offer != null && actions?.Busy == false)
+                        { layout.ActionRequested = true; refresh = true; }
+                        // Never carry a confirmation to a different row.
+                        if (refresh && items.Count > 0 && row != sample.Rows.IndexOf(items[Math.Min(items.Count - 1, nav.Selected)]))
+                        { selection.Bind(Guid.Empty, null); layout.ActionRequested = false; }
+                    }
+                    if (layout.ActionRequested)
+                    {
+                        layout.ActionRequested = false;
+                        if (selection.Kind != ActionKind.None && offer != null && actions?.Busy == false)
+                        {
+                            if (selection.Confirming)
+                            {
+                                if (actions.Submit(sample.Session, selection.Revision, offer, selection.Kind, selection.Quantity))
+                                    selection.Confirming = false;
+                            }
+                            else selection.Confirming = true;
+                        }
+                        refresh = true;
+                    }
                     if (size != lastSize || refresh)
                     {
                         string path = Path.Combine(temp, "page-" + revision++ + ".png");
-                        using (var bitmap = layout.Make(sample, nav, demo, passive)) bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                        using (var bitmap = layout.Make(sample, nav, demo, passive, selection, actions?.Result ?? ActionResult.None, actions?.Busy == true)) bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
                         var next = Game.CreateTextureFromFile(path);
                         if (next == null) throw new IOException("Textura da interface indisponível.");
                         try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }

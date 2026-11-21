@@ -6,7 +6,7 @@ namespace ElectroInventory.Wire
 {
     [Flags]
     internal enum ActionKind : byte { None = 0, Use = 1, Discard = 2, Deposit = 4, Take = 8, Buy = 16, Sell = 32 }
-    internal enum ActionResult : byte { None, Accepted, Success, Rejected, Expired, Uncertain, Cancelled }
+    internal enum ActionResult : byte { None, Accepted, Success, Rejected, Expired, Uncertain, Cancelled, Started }
 
     internal sealed class ActionOffer
     {

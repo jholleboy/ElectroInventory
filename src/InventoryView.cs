@@ -33,7 +33,7 @@ namespace ElectroInventory
                     System.Globalization.CompareOptions.IgnoreNonSpace) >= 0).ToList();
         }
 
-        public Bitmap Make(Snapshot snapshot, Navigation nav, bool demo, bool passive)
+        public Bitmap Make(Snapshot snapshot, Navigation nav, bool demo, bool passive, ActionSelection action, ActionResult result, bool busy)
         {
             var image = new Bitmap(Width, Height);
             using (var g = Graphics.FromImage(image))
@@ -44,7 +44,7 @@ namespace ElectroInventory
                 Box(g, new Rectangle(0, 0, Width, Height), Color.FromArgb(9, 19, 31), Cyan);
                 Line(g, 25, 72, Width - 25, 72, Edge);
                 Text(g, "◇  ELECTROINVENTORY", 29, 20, 480, 33, 21, Cyan, true);
-                Text(g, demo ? "DADOS DEMONSTRATIVOS" : "RC2  /  SOMENTE LEITURA", 810, 25, 300, 32, 16, Pink, true);
+                Text(g, demo ? "DADOS DEMONSTRATIVOS" : "RC2  /  " + (action.Offer == null ? "LEITURA" : "AÇÕES AUTORIZADAS"), 810, 25, 300, 32, 16, Pink, true);
                 if (!passive)
                     Button(g, new Rectangle(1250, 20, 120, 38), "Esc  Fechar", () => CloseRequested = true);
                 Text(g, snapshot.Mode == 1 ? "ARMAZENAMENTO" : snapshot.Mode == 2 ? "COMÉRCIO" : "INVENTÁRIO",
@@ -87,8 +87,9 @@ namespace ElectroInventory
                 else Grid(g, active, nav, false, new Rectangle(26, 230, 912, 458),
                     snapshot.Mode == 2 ? "Ofertas da sessão" : "Itens pessoais", 3, passive);
                 DrawDetail(g, count == 0 ? null : active[nav.Selected]);
+                DrawActions(g, action, result, busy, passive);
                 Line(g, 25, 704, Width - 25, 704, Edge);
-                Text(g, passive ? "F10 fecha  ·  Ctrl+F6 troca lado  ·  Ctrl+F7/F8 pagina  ·  Menu original mantém o controle" :
+                Text(g, passive ? "F10 fecha  ·  Ctrl+F6 troca lado  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F4 ação  ·  Ctrl+Enter confirma  ·  Ctrl+F5 cancela" :
                     "Setas / mouse  Navegar     •     PgUp / PgDn / roda  Página     •     /  Pesquisar     •     I / Esc  Fechar",
                     28, 718, 1150, 27, 16, Muted, false);
                 if (snapshot.Incomplete) Text(g, "Lista parcial", 1230, 718, 145, 27, 16, Pink, true);
@@ -96,7 +97,7 @@ namespace ElectroInventory
             return image;
         }
 
-        public bool CloseRequested;
+        public bool CloseRequested, ActionRequested;
         public void Click(Point point) { Targets.FindLast(hit => hit.Item1.Contains(point))?.Item2(); }
 
         private void Grid(Graphics g, List<Entry> rows, Navigation nav, bool right, Rectangle bounds, string title, int columns, bool passive)
@@ -130,8 +131,40 @@ namespace ElectroInventory
             Text(g, Glyph(row), 971, 276, 365, 52, 36, Pink, true);
             Text(g, row.Name, 971, 329, 370, 53, 24, Ink, true);
             Text(g, row.Category + "  ·  " + Summary(row), 971, 381, 370, 35, 17, Cyan, false);
-            Text(g, row.Description, 971, 424, 370, 133, 19, Ink, false);
-            Text(g, row.Detail, 971, 569, 370, 91, 16, Muted, false);
+            Text(g, row.Description, 971, 424, 370, 83, 19, Ink, false);
+            Text(g, row.Detail, 971, 510, 370, 48, 16, Muted, false);
+        }
+
+        private void DrawActions(Graphics g, ActionSelection action, ActionResult result, bool busy, bool passive)
+        {
+            string status = busy ? "Aguardando o LS RED…" : result == ActionResult.Started ? "Atividade iniciada no LS RED." :
+                result == ActionResult.Success ? "Operação concluída." : result == ActionResult.Expired ? "Contexto alterado. Selecione novamente." :
+                result == ActionResult.Rejected ? "Operação recusada pelo LS RED." : result == ActionResult.Uncertain ?
+                "Resultado desconhecido. Confira o inventário." : result == ActionResult.Cancelled ? "Operação cancelada." : "";
+            Text(g, status, 970, 655, 380, 26, 15, Muted, false);
+            if (action.Kind == ActionKind.None || busy)
+            {
+                if (!busy) Text(g, "Nenhuma ação autorizada para esta seleção.", 970, 603, 380, 42, 16, Muted, false);
+                return;
+            }
+            string label = ActionSelection.Label(action.Kind);
+            if (passive)
+            {
+                Text(g, (action.Confirming ? "Confirmar: " : "") + label + "  × " + action.Quantity,
+                    970, 593, 370, 56, 20, action.Confirming ? Pink : Cyan, true);
+                return;
+            }
+            if (action.Confirming)
+            {
+                Button(g, new Rectangle(970, 595, 225, 41), "Confirmar " + label + " × " + action.Quantity,
+                    () => ActionRequested = true, true);
+                Button(g, new Rectangle(1204, 595, 140, 41), "Cancelar", () => action.Confirming = false);
+                return;
+            }
+            Button(g, new Rectangle(970, 595, 177, 41), label + " × " + action.Quantity, () => ActionRequested = true, true);
+            Button(g, new Rectangle(1154, 595, 84, 41), "Ação ›", action.NextKind);
+            Button(g, new Rectangle(1245, 595, 44, 41), "−", () => action.Adjust(-1));
+            Button(g, new Rectangle(1296, 595, 44, 41), "+", () => action.Adjust(1));
         }
 
         private static string Glyph(Entry row)

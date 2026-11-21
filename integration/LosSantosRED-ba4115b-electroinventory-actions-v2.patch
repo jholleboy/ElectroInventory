@@ -1,0 +1,1009 @@
+diff --git a/Los Santos RED/ElectroInventoryActionProtocol.cs b/Los Santos RED/ElectroInventoryActionProtocol.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..ff1f0a4ef776b9414c88e50b4f9b316230e39b52
+--- /dev/null
++++ b/Los Santos RED/ElectroInventoryActionProtocol.cs	
+@@ -0,0 +1,61 @@
++using System;
++using System.IO.MemoryMappedFiles;
++using System.Threading;
++
++namespace ElectroInventory.Wire
++{
++    [Flags]
++    internal enum ActionKind : byte { None = 0, Use = 1, Discard = 2, Deposit = 4, Take = 8, Buy = 16, Sell = 32 }
++    internal enum ActionResult : byte { None, Accepted, Success, Rejected, Expired, Uncertain, Cancelled, Started }
++
++    internal sealed class ActionOffer
++    {
++        public Guid Token;
++        public ActionKind Kinds;
++        public int Maximum;
++    }
++
++    internal sealed class ActionCommand
++    {
++        public Guid Id, Session, Revision, Token;
++        public ActionKind Kind;
++        public int Quantity;
++    }
++
++    // The v1 snapshot remains unchanged. This separate channel binds offers to its exact publication stamp.
++    internal static class ActionProtocol
++    {
++        public const int Magic = 0x45494132, Capacity = 65536, Offers = 160, OfferSize = 24;
++        public static string Channel(int pid) => @"Local\ElectroInventory.Lsr.actions.v2." + pid;
++
++        public static bool Authorize(ActionCommand command, Guid session, Guid revision, ActionOffer offer) =>
++            command != null && command.Id != Guid.Empty && session != Guid.Empty && revision != Guid.Empty
++            && command.Session == session && command.Revision == revision && offer != null
++            && offer.Token != Guid.Empty && command.Token == offer.Token
++            && ValidKind(command.Kind) && (offer.Kinds & command.Kind) != 0
++            && command.Quantity > 0 && command.Quantity <= offer.Maximum
++            && (command.Kind != ActionKind.Use || command.Quantity == 1);
++
++        private static bool ValidKind(ActionKind kind) => kind == ActionKind.Use || kind == ActionKind.Discard
++            || kind == ActionKind.Deposit || kind == ActionKind.Take || kind == ActionKind.Buy || kind == ActionKind.Sell;
++
++        public static Guid ReadGuid(MemoryMappedViewAccessor view, int offset)
++        {
++            var bytes = new byte[16];
++            view.ReadArray(offset, bytes, 0, bytes.Length);
++            return new Guid(bytes);
++        }
++
++        public static void WriteGuid(MemoryMappedViewAccessor view, int offset, Guid guid)
++        {
++            var bytes = guid.ToByteArray();
++            view.WriteArray(offset, bytes, 0, bytes.Length);
++        }
++
++        public static bool TryLock(Mutex mutex)
++        {
++            try { return mutex.WaitOne(0); }
++            catch (AbandonedMutexException) { mutex.ReleaseMutex(); return false; }
++        }
++    }
++}
+diff --git a/Los Santos RED/ElectroInventoryActionServer.cs b/Los Santos RED/ElectroInventoryActionServer.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..8c480426685048baace6e9648879f1403b6ea9f9
+--- /dev/null
++++ b/Los Santos RED/ElectroInventoryActionServer.cs	
+@@ -0,0 +1,149 @@
++using System;
++using System.Collections.Generic;
++using System.Diagnostics;
++using System.IO.MemoryMappedFiles;
++using System.Linq;
++using System.Threading;
++using ElectroInventory.Wire;
++
++namespace LosSantosRED.lsr
++{
++    internal sealed class InventoryActionBinding
++    {
++        internal object Identity;
++        internal ActionOffer Offer;
++        internal Func<ActionCommand, ActionResult> Execute;
++    }
++
++    internal sealed class ElectroInventoryActionServer : IDisposable
++    {
++        private MemoryMappedFile map;
++        private MemoryMappedViewAccessor view;
++        private Mutex mutex;
++        private byte[] previous;
++        private List<InventoryActionBinding> bindings = new List<InventoryActionBinding>();
++        private Guid revision, replyId;
++        private ActionResult reply;
++        private bool disabled, executing;
++
++        internal void Update(int pid, long stamp, Snapshot snapshot, byte[] payload,
++            List<InventoryActionBinding> current)
++        {
++            if (disabled || executing) return;
++            ActionCommand command = null;
++            InventoryActionBinding selected = null;
++            try
++            {
++                if (view == null)
++                {
++                    string channel = ActionProtocol.Channel(pid);
++                    mutex = new Mutex(false, channel + ".Lock");
++                    map = MemoryMappedFile.CreateOrOpen(channel, ActionProtocol.Capacity);
++                    view = map.CreateViewAccessor(0, ActionProtocol.Capacity);
++                }
++                int visibleRows = Protocol.Decode(payload).Rows.Count;
++                if (current.Count > visibleRows) current.RemoveRange(visibleRows, current.Count - visibleRows);
++                bool changed = previous == null || !previous.SequenceEqual(payload) || !SameBindings(current);
++                if (changed) revision = Guid.NewGuid();
++                else
++                    for (int i = 0; i < current.Count; i++)
++                        if (current[i] != null) current[i].Offer.Token = bindings[i].Offer.Token;
++
++                if (!ActionProtocol.TryLock(mutex)) return;
++                try
++                {
++                    if (view.ReadInt32(64) == 1)
++                    {
++                        command = new ActionCommand { Id = ActionProtocol.ReadGuid(view, 68),
++                            Session = ActionProtocol.ReadGuid(view, 84), Revision = ActionProtocol.ReadGuid(view, 100),
++                            Token = ActionProtocol.ReadGuid(view, 116), Kind = (ActionKind)view.ReadByte(132),
++                            Quantity = view.ReadInt32(136) };
++                        view.Write(64, 0);
++                        selected = current.FirstOrDefault(binding => binding?.Offer.Token == command.Token);
++                        bool fresh = Protocol.Fresh(view.ReadInt64(140), Stopwatch.GetTimestamp());
++                        replyId = command.Id;
++                        reply = !fresh || command.Session != snapshot.Session || command.Revision != revision
++                            ? ActionResult.Expired : !ActionProtocol.Authorize(command, snapshot.Session, revision, selected?.Offer)
++                            ? ActionResult.Rejected : ActionResult.Accepted;
++                        if (reply == ActionResult.Accepted)
++                        {
++                            // Retire this revision before calling any native routine, including those that yield.
++                            revision = Guid.NewGuid();
++                            foreach (var binding in current)
++                                if (binding != null) binding.Offer.Token = Guid.NewGuid();
++                        }
++                        else selected = null;
++                    }
++                    view.Write(8, 0L);
++                    view.Write(0, ActionProtocol.Magic);
++                    view.Write(4, pid);
++                    ActionProtocol.WriteGuid(view, 16, revision);
++                    view.Write(32, current.Count);
++                    for (int i = 0; i < current.Count; i++)
++                    {
++                        int offset = ActionProtocol.Offers + i * ActionProtocol.OfferSize;
++                        var offer = current[i]?.Offer;
++                        ActionProtocol.WriteGuid(view, offset, offer?.Token ?? Guid.Empty);
++                        view.Write(offset + 16, (byte)(offer?.Kinds ?? ActionKind.None));
++                        view.Write(offset + 20, offer?.Maximum ?? 0);
++                    }
++                    ActionProtocol.WriteGuid(view, 40, replyId);
++                    view.Write(56, (byte)reply);
++                    if (selected == null) view.Write(8, stamp);
++                    previous = payload;
++                    bindings = current;
++                }
++                finally { mutex.ReleaseMutex(); }
++
++                if (selected != null)
++                {
++                    executing = true;
++                    try { reply = selected.Execute(command); }
++                    catch (ThreadAbortException) { throw; }
++                    catch (Exception e)
++                    {
++                        reply = ActionResult.Uncertain;
++                        Rage.Game.LogTrivial("[ElectroInventory RC2] Executor interrompido: " + e.GetType().Name);
++                    }
++                    finally
++                    {
++                        executing = false;
++                        previous = null;
++                    }
++                }
++            }
++            catch (ThreadAbortException) { throw; }
++            catch (Exception e)
++            {
++                disabled = true;
++                Dispose();
++                Rage.Game.LogTrivial("[ElectroInventory RC2] Canal de ações desativado: " + e.GetType().Name);
++            }
++        }
++
++        private bool SameBindings(List<InventoryActionBinding> other)
++        {
++            if (other.Count != bindings.Count) return false;
++            for (int i = 0; i < other.Count; i++)
++            {
++                var left = bindings[i];
++                var right = other[i];
++                if (left == null && right == null) continue;
++                if (left == null || right == null || !ReferenceEquals(left.Identity, right.Identity)
++                    || left.Offer.Kinds != right.Offer.Kinds || left.Offer.Maximum != right.Offer.Maximum) return false;
++            }
++            return true;
++        }
++
++        public void Dispose()
++        {
++            if (view != null && mutex != null && ActionProtocol.TryLock(mutex))
++            {
++                try { view.Write(8, 0L); view.Write(64, 0); }
++                finally { mutex.ReleaseMutex(); }
++            }
++            view?.Dispose(); map?.Dispose(); mutex?.Dispose();
++            view = null; map = null; mutex = null;
++        }
++    }
++}
+diff --git a/Los Santos RED/ElectroInventoryProtocol.cs b/Los Santos RED/ElectroInventoryProtocol.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..aa0eabb23b52a655bf102b9b16c907bc7fec0ea3
+--- /dev/null
++++ b/Los Santos RED/ElectroInventoryProtocol.cs	
+@@ -0,0 +1,133 @@
++using System;
++using System.Collections.Generic;
++using System.Diagnostics;
++using System.IO;
++using System.Text;
++
++namespace ElectroInventory.Wire
++{
++    internal sealed class Entry
++    {
++        public string Id, Name, Category, Description, Detail;
++        public double Quantity = double.NaN;
++        public double Price = double.NaN;
++        public byte Group; // 0 player/items, 1 stored items, 2 weapons, 3 cash, 4 buy, 5 sell
++    }
++
++    internal sealed class Snapshot
++    {
++        public Guid Session;
++        public long PublicationStamp;
++        public int Character;
++        public byte Mode; // 0 inventory, 1 storage, 2 trade
++        public bool BlocksInput, Incomplete;
++        public string Title;
++        public double Balance = double.NaN;
++        public List<Entry> Rows = new List<Entry>();
++    }
++
++    internal static class Protocol
++    {
++        public const int Magic = 0x45494E31, Version = 1, Header = 24, Capacity = 1024 * 1024;
++        public const int MaxRows = 2000, MaxTextBytes = 4096;
++        private static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
++        public static string Channel(int pid) => @"Local\ElectroInventory.Lsr.read.v1." + pid;
++        public static bool Fresh(long stamp, long now) =>
++            stamp > 0 && stamp <= now && now - stamp <= Stopwatch.Frequency * 2;
++
++        public static byte[] Encode(Snapshot value)
++        {
++            using (var rows = new MemoryStream())
++            using (var rowWriter = new BinaryWriter(rows, Utf8, true))
++            using (var output = new MemoryStream())
++            using (var writer = new BinaryWriter(output, Utf8, true))
++            {
++                int count = 0;
++                foreach (var row in value.Rows)
++                {
++                    if (count == MaxRows || rows.Length > Capacity - Header - 6 * MaxTextBytes - 128)
++                        break;
++                    rowWriter.Write(row.Group);
++                    rowWriter.Write(row.Quantity);
++                    rowWriter.Write(row.Price);
++                    WriteText(rowWriter, row.Id);
++                    WriteText(rowWriter, row.Name);
++                    WriteText(rowWriter, row.Category);
++                    WriteText(rowWriter, row.Description);
++                    WriteText(rowWriter, row.Detail);
++                    count++;
++                }
++                writer.Write(value.Session.ToByteArray());
++                writer.Write(value.Character);
++                writer.Write(value.Mode);
++                writer.Write(value.BlocksInput);
++                writer.Write(value.Incomplete || count < value.Rows.Count);
++                writer.Write(value.Balance);
++                WriteText(writer, value.Title);
++                writer.Write(count);
++                rows.WriteTo(output);
++                return output.ToArray();
++            }
++        }
++
++        public static Snapshot Decode(byte[] payload)
++        {
++            if (payload == null || payload.Length > Capacity - Header)
++                throw new InvalidDataException("Tamanho do snapshot inválido.");
++            using (var input = new MemoryStream(payload, false))
++            using (var reader = new BinaryReader(input, Utf8))
++            {
++                var value = new Snapshot
++                {
++                    Session = new Guid(reader.ReadBytes(16)),
++                    Character = reader.ReadInt32(),
++                    Mode = reader.ReadByte(),
++                    BlocksInput = reader.ReadBoolean(),
++                    Incomplete = reader.ReadBoolean(),
++                    Balance = ReadNumber(reader, true),
++                    Title = ReadText(reader)
++                };
++                int count = reader.ReadInt32();
++                if (value.Session == Guid.Empty || value.Character == 0 || value.Mode > 2 || count < 0 || count > MaxRows)
++                    throw new InvalidDataException("Metadados inválidos.");
++                for (int i = 0; i < count; i++)
++                {
++                    byte group = reader.ReadByte();
++                    if (group > 5) throw new InvalidDataException("Grupo inválido.");
++                    value.Rows.Add(new Entry { Group = group, Quantity = ReadNumber(reader, false), Price = ReadNumber(reader, false),
++                        Id = ReadText(reader), Name = ReadText(reader), Category = ReadText(reader),
++                        Description = ReadText(reader), Detail = ReadText(reader) });
++                }
++                if (input.Position != input.Length) throw new InvalidDataException("Dados excedentes.");
++                return value;
++            }
++        }
++
++        private static double ReadNumber(BinaryReader reader, bool signed)
++        {
++            double value = reader.ReadDouble();
++            if (double.IsInfinity(value) || (!signed && value < 0))
++                throw new InvalidDataException("Valor numérico inválido.");
++            return value;
++        }
++
++        private static void WriteText(BinaryWriter writer, string text)
++        {
++            text = text ?? "";
++            int use = Math.Min(text.Length, MaxTextBytes / 4);
++            if (use > 0 && char.IsHighSurrogate(text[use - 1])) use--;
++            byte[] bytes = Encoding.UTF8.GetBytes(text.Substring(0, use));
++            writer.Write(bytes.Length);
++            writer.Write(bytes);
++        }
++
++        private static string ReadText(BinaryReader reader)
++        {
++            int length = reader.ReadInt32();
++            if (length < 0 || length > MaxTextBytes) throw new InvalidDataException("Campo de texto inválido.");
++            byte[] bytes = reader.ReadBytes(length);
++            if (bytes.Length != length) throw new EndOfStreamException();
++            return Utf8.GetString(bytes);
++        }
++    }
++}
+diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..8bb4b3481a91fbb355851a529082e03ed1efeb22
+--- /dev/null
++++ b/Los Santos RED/ElectroInventoryPublisher.cs	
+@@ -0,0 +1,215 @@
++using ElectroInventory.Wire;
++using Rage;
++using System;
++using System.Collections.Generic;
++using System.Diagnostics;
++using System.IO.MemoryMappedFiles;
++using System.Threading;
++
++namespace LosSantosRED.lsr
++{
++    internal sealed class ElectroInventoryPublisher : IDisposable
++    {
++        private static object owner;
++        private static Func<bool> valid;
++        private static Action<Snapshot> fill;
++        private static Guid contextSession;
++        private static long touch;
++        private MemoryMappedFile map;
++        private MemoryMappedViewAccessor view;
++        private Mutex mutex;
++        private Guid personalSession;
++        private int character;
++        private bool disabled;
++        private readonly ElectroInventoryActionServer actions = new ElectroInventoryActionServer();
++        private static bool BlocksPersonal(ModController controller) =>
++            controller.IsDisplayingAlertScreen || VehicleShowcase.ElectroInventoryActive
++            || !controller.Player.IsAliveAndFree || controller.Player.CuffManager.IsHandcuffed
++            || controller.Player.IsShowingFrontEndMenus || controller.Player.IsDisplayingCustomMenus
++            || controller.Player.IsShowingActionWheel || controller.Player.CellPhone?.IsActive == true
++            || controller.Player.ActivityManager.IsInteractingWithLocation || controller.Player.ActivityManager.IsPerformingActivity;
++
++        private static bool SupportsUse(ModItem item) => item is FoodItem || item is DrinkItem || item is BodyArmorItem
++            || item is FlashlightItem && !(item is CellphoneItem) || item is BinocularsItem
++            || item is RadioItem || item is UmbrellaItem;
++
++        private static bool SameCharacter(ModController controller, int handle) =>
++            controller.IsRunning && controller.Player?.Character != null && controller.Player.Character.Exists()
++            && unchecked((int)(uint)controller.Player.Character.Handle) == handle;
++
++        private static InventoryActionBinding PersonalBinding(ModController controller, Snapshot snapshot, Entry row)
++        {
++            if (snapshot.Mode != 0 || snapshot.BlocksInput || row.Group != 0)
++                return null;
++            var player = controller.Player;
++            var item = player.Inventory.ItemsList.Find(candidate => candidate.ModItem?.Name == row.Id);
++            if (item == null || item.Amount <= 0 || player.Inventory.ItemsList.FindLast(candidate => candidate.ModItem?.Name == row.Id) != item)
++                return null;
++            var kinds = ActionKind.Discard | (SupportsUse(item.ModItem) ? ActionKind.Use : ActionKind.None);
++            return new InventoryActionBinding
++            {
++                Identity = item, Offer = new ActionOffer { Token = Guid.NewGuid(), Kinds = kinds, Maximum = item.Amount },
++                Execute = command =>
++                {
++                    if (!SameCharacter(controller, snapshot.Character) || BlocksPersonal(controller)
++                        || !ReferenceEquals(player.Inventory.Get(item.ModItem), item) || item.RemainingPercent != row.Quantity)
++                        return ActionResult.Expired;
++                    if (command.Kind == ActionKind.Use && SupportsUse(item.ModItem))
++                        return player.ActivityManager.TryElectroInventoryUse(item.ModItem) ? ActionResult.Started : ActionResult.Rejected;
++                    if (command.Kind != ActionKind.Discard || command.Quantity > item.Amount
++                        || (command.Quantity != 1 && command.Quantity != item.Amount && !(command.Quantity == 5 && item.Amount > 5)))
++                        return ActionResult.Rejected;
++                    return player.ActivityManager.TryElectroInventoryDrop(item.ModItem, command.Quantity)
++                        ? ActionResult.Started : ActionResult.Rejected;
++                }
++            };
++        }
++
++        internal static void Track(object key, Func<bool> isValid, Action<Snapshot> populate)
++        {
++            if (!ReferenceEquals(owner, key)) contextSession = Guid.NewGuid();
++            owner = key;
++            valid = isValid;
++            fill = populate;
++            touch = Stopwatch.GetTimestamp();
++        }
++
++        internal static void Clear(object key)
++        {
++            if (!ReferenceEquals(owner, key)) return;
++            owner = null;
++            valid = null;
++            fill = null;
++        }
++
++        internal static void Storage(Snapshot snapshot, string title, SimpleInventory items,
++            WeaponStorage weapons, CashStorage cash, List<ItemType> allowed, List<ItemType> denied)
++        {
++            snapshot.Mode = 1;
++            snapshot.Title = title;
++            var restrictions = new List<string>();
++            if (items != null) restrictions.Add("Itens");
++            if (weapons != null) restrictions.Add("Armas");
++            if (cash != null) restrictions.Add("Dinheiro");
++            snapshot.Title += " | " + string.Join(", ", restrictions);
++            if (items != null) CopyItems(snapshot, items.ItemsList, 1, allowed, denied);
++            if (weapons != null)
++                foreach (var weapon in weapons.StoredWeapons)
++                {
++                    if (snapshot.Rows.Count >= Protocol.MaxRows) { snapshot.Incomplete = true; break; }
++                    snapshot.Rows.Add(new Entry { Id = weapon.WeaponHash.ToString(), Name = weapon.ElectroInventoryDisplayName,
++                        Category = "Armas", Quantity = 1, Group = 2, Detail = "Munição: " + weapon.Ammo });
++                }
++            if (cash != null && snapshot.Rows.Count < Protocol.MaxRows)
++                snapshot.Rows.Add(new Entry { Id = "cash", Name = "Dinheiro em espécie", Category = "Dinheiro",
++                    Quantity = cash.StoredCash, Group = 3 });
++        }
++
++        private static void CopyItems(Snapshot snapshot, List<InventoryItem> items, byte group,
++            List<ItemType> allowed = null, List<ItemType> denied = null)
++        {
++            foreach (var item in items)
++            {
++                if (snapshot.Rows.Count >= Protocol.MaxRows) { snapshot.Incomplete = true; break; }
++                var definition = item?.ModItem;
++                if (definition == null || item.RemainingPercent <= 0 || float.IsNaN(item.RemainingPercent)
++                    || float.IsInfinity(item.RemainingPercent)
++                    || (allowed != null && allowed.Count > 0 ? !allowed.Contains(definition.ItemType)
++                        : denied != null && denied.Contains(definition.ItemType))) continue;
++                snapshot.Rows.Add(new Entry { Id = definition.Name, Name = definition.DisplayName,
++                    Category = global::LanguageStrings.Translate("content.item.type." + definition.ItemType, definition.ItemType.ToString()),
++                    Description = definition.DisplayDescription, Group = group, Quantity = item.RemainingPercent,
++                    Detail = (definition.IsPossessionIllicit ? "Posse ilícita. " : "") + definition.GetDisplayMeasurementName()
++                        + (definition.CanConsume ? " · Consumível" : "") });
++            }
++        }
++
++        internal void Publish(ModController controller)
++        {
++            if (disabled) return;
++            try
++            {
++                var player = controller.Player;
++                var ped = player?.Character;
++                if (!controller.IsRunning || ped == null || !ped.Exists()) return;
++                int handle = unchecked((int)(uint)ped.Handle);
++                if (character != handle)
++                {
++                    if (character != 0) Clear(owner);
++                    character = handle;
++                    personalSession = Guid.NewGuid();
++                }
++                var snapshot = new Snapshot
++                {
++                    Session = personalSession, Character = character, Title = "Inventário pessoal",
++                    BlocksInput = BlocksPersonal(controller)
++                };
++                if (owner != null && Stopwatch.GetTimestamp() - touch <= Stopwatch.Frequency / 2 && valid())
++                {
++                    snapshot.Session = contextSession;
++                    snapshot.BlocksInput = true;
++                    fill(snapshot);
++                }
++                if (snapshot.Mode != 2 && player.Inventory != null)
++                    CopyItems(snapshot, player.Inventory.ItemsList, 0);
++                byte[] payload = Protocol.Encode(snapshot);
++                int pid;
++                using (var process = Process.GetCurrentProcess()) pid = process.Id;
++                if (view == null)
++                {
++                    string channel = Protocol.Channel(pid);
++                    mutex = new Mutex(false, channel + ".Lock");
++                    map = MemoryMappedFile.CreateOrOpen(channel, Protocol.Capacity);
++                    view = map.CreateViewAccessor(0, Protocol.Capacity);
++                }
++                long stamp = 0;
++                bool held = false;
++                try
++                {
++                    try { held = mutex.WaitOne(0); }
++                    catch (AbandonedMutexException) { held = true; }
++                    if (!held) return;
++                    view.Write(16, 0L);
++                    view.Write(0, Protocol.Magic);
++                    view.Write(4, Protocol.Version);
++                    view.Write(8, pid);
++                    view.Write(12, payload.Length);
++                    view.WriteArray(Protocol.Header, payload, 0, payload.Length);
++                    stamp = Stopwatch.GetTimestamp();
++                    view.Write(16, stamp);
++                }
++                finally { if (held) mutex.ReleaseMutex(); }
++                var bindings = snapshot.Rows.ConvertAll(row => PersonalBinding(controller, snapshot, row));
++                actions.Update(pid, stamp, snapshot, payload, bindings);
++            }
++            catch (ThreadAbortException) { throw; }
++            catch (Exception e)
++            {
++                disabled = true;
++                Dispose();
++                Game.LogTrivial("[ElectroInventory RC2] publicação interrompida: " + e.GetType().Name);
++            }
++        }
++
++        public void Dispose()
++        {
++            Clear(owner);
++            actions.Dispose();
++            if (view != null)
++            {
++                bool held = false;
++                try
++                {
++                    try { held = mutex.WaitOne(0); }
++                    catch (AbandonedMutexException) { held = true; }
++                    if (held) view.Write(16, 0L);
++                }
++                catch (System.IO.IOException) { }
++                catch (ObjectDisposedException) { }
++                finally { if (held) mutex.ReleaseMutex(); }
++            }
++            view?.Dispose(); map?.Dispose(); mutex?.Dispose();
++            view = null; map = null; mutex = null;
++        }
++    }
++}
+diff --git a/Los Santos RED/Los Santos RED.csproj b/Los Santos RED/Los Santos RED.csproj
+index 36a4a25d23c43289de59ce85c5f75a58941d624b..eea3aac69ab6715460200061e6a68ac738530377 100644
+--- a/Los Santos RED/Los Santos RED.csproj	
++++ b/Los Santos RED/Los Santos RED.csproj	
+@@ -1404,6 +1404,10 @@
+     <Compile Include="lsr\World\Vehicles\VehicleHandlingDataModifier.cs" />
+     <Compile Include="lsr\World\WeatherReporting.cs" />
+     <Compile Include="ModController.cs" />
++    <Compile Include="ElectroInventoryProtocol.cs" />
++    <Compile Include="ElectroInventoryPublisher.cs" />
++    <Compile Include="ElectroInventoryActionProtocol.cs" />
++    <Compile Include="ElectroInventoryActionServer.cs" />
+     <Compile Include="lsr\Player\Player.cs" />
+     <Compile Include="lsr\Ped\PedConfigFlags.cs" />
+     <Compile Include="lsr\Police\Police.cs" />
+diff --git a/Los Santos RED/ModController.cs b/Los Santos RED/ModController.cs
+index 020d96832cdda2e97ca2a4e971d292bb22ef0454..4c91f9749153a37d952294b9608c3561f8395344 100644
+--- a/Los Santos RED/ModController.cs	
++++ b/Los Santos RED/ModController.cs	
+@@ -26,6 +26,7 @@ namespace LosSantosRED.lsr
+         private Mod.Tasker Tasker;
+         private Mod.Time Time;
+         private UI UI;
++        private readonly ElectroInventoryPublisher electroInventoryPublisher = new ElectroInventoryPublisher();
+         private VanillaManager VanillaManager;
+         private NAudioPlayer NAudioPlayer;
+         private NAudioPlayer NAudioPlayer2;
+@@ -191,6 +192,7 @@ namespace LosSantosRED.lsr
+             Time.Dispose();
+             Weather.Dispose();
+             Debug.Dispose();
++            electroInventoryPublisher.Dispose();
+             WeatherManager.Dispose();
+ 
+ 
+@@ -222,6 +224,7 @@ namespace LosSantosRED.lsr
+                     new ModTask(250, "Player.TrafficViolationsUpdate", Player.Violations.TrafficViolations.Update, 4),
+                     new ModTask(250, "Player.LocationUpdate", Player.LocationUpdate, 5),
+                     new ModTask(250, "Player.ArrestWarrantUpdate",Player.CriminalHistory.Update, 6),//these were all 500
++                    new ModTask(200, "ElectroInventory.Read", () => electroInventoryPublisher.Publish(this), 0),
+                 }),
+                 new ModTaskGroup("RG3:World Gen", new List<ModTask>()//something in here is causing a hang on some crapola computers
+                 {
+diff --git a/Los Santos RED/lsr/Inventory/CashStorage.cs b/Los Santos RED/lsr/Inventory/CashStorage.cs
+index 929e8f36477b97664f5e63a430ddca1e9a507717..8bda39511cbce7044563a03ec74a6fdbd66d662e 100644
+--- a/Los Santos RED/lsr/Inventory/CashStorage.cs	
++++ b/Los Santos RED/lsr/Inventory/CashStorage.cs	
+@@ -35,12 +35,15 @@ public class CashStorage
+         StoredCash = 0;
+     }
+ 
++    internal UIMenu ElectroInventoryMenu { get; private set; }
++
+     public void CreateInteractionMenu(IInteractionable player, MenuPool MenuPool, UIMenu InteractionMenu, GameLocation gameLocation, bool withAnimation, bool removeBanner)//, IMessageDisplayable messageDisplayable)
+     {
+         Player = player;
+         GameLocation = gameLocation;
+         WithAnimation = withAnimation;
+         cashStorageSubMenu = MenuPool.AddSubMenu(InteractionMenu, LanguageStrings.Translate("storage.cash.title", "Stored Cash"));
++        ElectroInventoryMenu = cashStorageSubMenu;
+         cashStorageSubMenuItem = InteractionMenu.MenuItems[InteractionMenu.MenuItems.Count() - 1];
+         cashStorageSubMenuItem.Description = LanguageStrings.Translate("storage.cash.manage", "Manage stored cash.");
+         if (removeBanner)
+diff --git a/Los Santos RED/lsr/Inventory/SimpleInventory.cs b/Los Santos RED/lsr/Inventory/SimpleInventory.cs
+index 0c46be0e1a643bbf8f6154267838787f2d3cb855..ccd4df3576fd4a47f50582c639151c541b8e22f8 100644
+--- a/Los Santos RED/lsr/Inventory/SimpleInventory.cs	
++++ b/Los Santos RED/lsr/Inventory/SimpleInventory.cs	
+@@ -92,6 +92,8 @@ public class SimpleInventory
+             }
+         }
+     }
++    internal UIMenu ElectroInventoryMenu { get; private set; }
++
+     public void CreateInteractionMenu(IInteractionable player, MenuPool menuPool, UIMenu menuToAdd, bool withAnimations, List<ItemType> AllowedItemTypes, List<ItemType> DisallowedItemTypes, bool removeBanner, string overrideTitle, string overrideDescription)
+     {
+         string title = "Stored Inventory";
+@@ -108,6 +110,7 @@ public class SimpleInventory
+         }
+ 
+         UIMenu VehicleInventoryItem = menuPool.AddSubMenu(menuToAdd, title);
++        ElectroInventoryMenu = VehicleInventoryItem;
+         menuToAdd.MenuItems[menuToAdd.MenuItems.Count() - 1].Description = description;
+         if (removeBanner)
+         {
+diff --git a/Los Santos RED/lsr/Inventory/WeaponStorage.cs b/Los Santos RED/lsr/Inventory/WeaponStorage.cs
+index 9c4fed33ae3f2b21b57f1655f1d85a5b2ce55740..7ca80677550575c32e3627c14a9de5df32cdcb1d 100644
+--- a/Los Santos RED/lsr/Inventory/WeaponStorage.cs	
++++ b/Los Santos RED/lsr/Inventory/WeaponStorage.cs	
+@@ -67,10 +67,13 @@ public class WeaponStorage
+         StoredWeapons.Remove(storedWeapon);
+         storedWeapon.GiveToPlayer(Weapons);
+     }
++    internal UIMenu ElectroInventoryMenu { get; private set; }
++
+     public void CreateInteractionMenu(IInteractionable player, MenuPool menuPool, UIMenu menuToAdd, IWeapons weapons, IModItems modItems, bool withAnimations, bool removeBanner)
+     {
+         Weapons = weapons;
+         UIMenu WeaponsHeaderMenu = menuPool.AddSubMenu(menuToAdd, LanguageStrings.Translate("storage.weapons.title", "Stored Weapons"));
++        ElectroInventoryMenu = WeaponsHeaderMenu;
+         menuToAdd.MenuItems[menuToAdd.MenuItems.Count() - 1].Description = LanguageStrings.Translate("storage.weapons.manage", "Manage Stored Weapons. Place items within storage, or retrieve them for use.");
+         if (removeBanner)
+         {
+diff --git a/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs b/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs
+index 802261ec553df5c8c7d38d3efdde0927d4d964b2..eb03f2bfca859f3e3506acd9a76db8b9e6ee0ff5 100644
+--- a/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs	
++++ b/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs	
+@@ -443,11 +443,17 @@ public class Business : GameLocation, ILocationSetupable, IRestableLocation, IIn
+         {
+             CashStorage.CreateInteractionMenu(Player, MenuPool, InteractionMenu, this, withAnimations, removeBanner);
+         }
++        System.Action<ElectroInventory.Wire.Snapshot> readStorage = snapshot =>
++            LosSantosRED.lsr.ElectroInventoryPublisher.Storage(snapshot, Name, withItems ? SimpleInventory : null,
++                withWeapons ? WeaponStorage : null, withCash ? CashStorage : null, AllowedItemTypes, DisallowedItemTypes);
++        System.Func<bool> storageVisible = () => Player.IsAliveAndFree && IsAnyMenuVisible && IsOwned;
+         while (IsAnyMenuVisible || Time.IsFastForwarding)
+         {
++            LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, storageVisible, readStorage);
+             global::UI.ProcessLocalizedMenus(MenuPool);
+             GameFiber.Yield();
+         }
++        LosSantosRED.lsr.ElectroInventoryPublisher.Clear(this);
+         DisposeInteractionMenu();
+         Player.ActivityManager.IsInteractingWithLocation = false;
+         Player.IsTransacting = false;
+diff --git a/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs b/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs
+index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..247e42e933e3dbef12676af4d7360b83544e0fa9 100644
+--- a/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs	
++++ b/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs	
+@@ -262,11 +262,17 @@ public class Residence : GameLocation, ILocationSetupable, IRestableLocation, II
+         {
+             CashStorage.CreateInteractionMenu(Player, MenuPool, InteractionMenu, this, withAnimations, removeBanner);
+         }
++        System.Action<ElectroInventory.Wire.Snapshot> readStorage = snapshot =>
++            LosSantosRED.lsr.ElectroInventoryPublisher.Storage(snapshot, Name, withItems ? SimpleInventory : null,
++                withWeapons ? WeaponStorage : null, withCash ? CashStorage : null, AllowedItemTypes, DisallowedItemTypes);
++        System.Func<bool> storageVisible = () => Player.IsAliveAndFree && IsAnyMenuVisible && IsOwnedOrRented;
+         while (IsAnyMenuVisible || Time.IsFastForwarding || KeepInteractionGoing)
+         {
++            LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, storageVisible, readStorage);
+             global::UI.ProcessLocalizedMenus(MenuPool);
+             GameFiber.Yield();
+         }
++        LosSantosRED.lsr.ElectroInventoryPublisher.Clear(this);
+         DisposeInteractionMenu();
+         Player.ActivityManager.IsInteractingWithLocation = false;
+         Player.IsTransacting = false;
+diff --git a/Los Santos RED/lsr/Locations/Places/Transaction.cs b/Los Santos RED/lsr/Locations/Places/Transaction.cs
+index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..4daec5ec022c850a5283b2a5fb5c2ff4f988ccce 100644
+--- a/Los Santos RED/lsr/Locations/Places/Transaction.cs	
++++ b/Los Santos RED/lsr/Locations/Places/Transaction.cs	
+@@ -63,8 +63,77 @@ public class Transaction
+     {
+ 
+     }
++    private ILocationInteractable electroInventoryPlayer;
++    private IModItems electroInventoryItems;
++    private string electroInventoryLastState;
++
++    private string ElectroInventoryUnavailable()
++    {
++        if (MenuPool?.IsAnyMenuOpen() != true || IsShowingConfirmDialog)
++            return "menu fechado ou confirmação ativa";
++        if (electroInventoryPlayer?.IsAliveAndFree != true ||
++            (PersonTransaction != null && !PersonTransaction.ElectroInventoryCanRead))
++            return "interação com jogador ou NPC indisponível";
++        if (ShopMenu?.Items == null || ShopMenu.Items.Count == 0 || electroInventoryItems == null)
++            return "sem catálogo de Transaction";
++        if (PurchaseMenu == null && SellMenu == null)
++            return "sem submenus de compra/venda";
++        return null;
++    }
++
++    private bool IsElectroInventoryTradeVisible() => ElectroInventoryUnavailable() == null;
++
++    private void ReadElectroInventoryTrade(ElectroInventory.Wire.Snapshot snapshot)
++    {
++        snapshot.Mode = 2;
++        string context = PersonTransaction != null ? "Comerciante" : Store is GunStore ? "Armas"
++            : Store is Dealership ? "Veículos" : "Estabelecimento";
++        snapshot.Title = context + " | " + (Store?.Name ?? StoreName);
++        snapshot.Balance = electroInventoryPlayer.BankAccounts.GetMoney(UseAccounts);
++        foreach (var offer in ShopMenu.Items)
++        {
++            var item = electroInventoryItems?.Get(offer.ModItemName);
++            if (item == null) continue;
++            var desired = ItemDesires?.Get(item);
++            bool special = item is WeaponItem || item is VehicleItem || item.ItemType == ItemType.Services;
++            if (offer.Purchaseable)
++            {
++                double stock = offer.NumberOfItemsToSellToPlayer < 0 || special ? double.NaN :
++                    Math.Max(0, offer.NumberOfItemsToSellToPlayer - (desired?.ItemsSoldToPlayer ?? offer.NumberOfItemsSoldToPlayer));
++                AddElectroInventoryOffer(snapshot, item, 4, special || IsStealing ? double.NaN : offer.PurchasePrice, stock,
++                    special ? "Preço final e disponibilidade no menu original." :
++                        (IsStealing ? "Contexto de retirada." : "Preço por pacote · " + item.AmountPerPackage + " por pacote"));
++            }
++            if (offer.Sellable)
++            {
++                var owned = electroInventoryPlayer.Inventory.Get(item);
++                int amount = owned?.Amount ?? 0;
++                int limit = offer.NumberOfItemsToPurchaseFromPlayer;
++                double available = special ? double.NaN : limit < 0 ? amount : Math.Min(amount,
++                    Math.Max(0, limit - (desired?.ItemsPurchasedFromPlayer ?? offer.NumberOfItemsPurchasedByPlayer)));
++                AddElectroInventoryOffer(snapshot, item, 5, special ? double.NaN : offer.SalesPrice, available,
++                    special ? "Preço final e disponibilidade no menu original." : "Quantidade elegível conforme a sessão.");
++            }
++        }
++    }
++
++    private static void AddElectroInventoryOffer(ElectroInventory.Wire.Snapshot snapshot, ModItem item,
++        byte group, double price, double count, string detail)
++    {
++        if (snapshot.Rows.Count >= ElectroInventory.Wire.Protocol.MaxRows)
++        {
++            snapshot.Incomplete = true;
++            return;
++        }
++        snapshot.Rows.Add(new ElectroInventory.Wire.Entry { Id = item.Name, Name = item.DisplayName,
++            Category = LanguageStrings.Translate("content.item.type." + item.ItemType, item.ItemType.ToString()),
++            Description = item.DisplayDescription, Group = group, Quantity = count, Price = price, Detail = detail });
++    }
++
+     public void CreateTransactionMenu(ILocationInteractable player, IModItems modItems, IEntityProvideable world, ISettingsProvideable settings, IWeapons weapons, ITimeControllable time)
+     {
++        electroInventoryPlayer = player;
++        electroInventoryItems = modItems;
+         SetupLists();
+         if (Store == null)
+         {
+@@ -317,6 +386,17 @@ public class Transaction
+     }
+     public void Update()
+     {
++        string readState = ElectroInventoryUnavailable();
++        string diagnostic = readState ?? "catálogo disponível";
++        if (electroInventoryLastState != diagnostic)
++        {
++            electroInventoryLastState = diagnostic;
++            Game.LogTrivial("[ElectroInventory RC2] Comércio " + (Store?.GetType().Name ?? "NPC") + ": " + diagnostic + ".");
++        }
++        if (readState == null)
++            LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, IsElectroInventoryTradeVisible, ReadElectroInventoryTrade);
++        else
++            LosSantosRED.lsr.ElectroInventoryPublisher.Clear(this);
+         if (MenuPool.IsAnyMenuOpen())
+         {
+             if (RotatePreview)
+@@ -339,6 +419,7 @@ public class Transaction
+     }
+     public void DisposeTransactionMenu()
+     {
++        LosSantosRED.lsr.ElectroInventoryPublisher.Clear(this);
+         PurchaseMenu?.Dispose();
+         SellMenu?.Dispose();
+     }
+diff --git a/Los Santos RED/lsr/Player/Activity/ActivityManager.cs b/Los Santos RED/lsr/Player/Activity/ActivityManager.cs
+index 7d53427bf4e4ec2ab95ffb84c9e4bade171bf61a..5ca10dcf1ca61994fdf1dc27ed2f920b204728ce 100644
+--- a/Los Santos RED/lsr/Player/Activity/ActivityManager.cs	
++++ b/Los Santos RED/lsr/Player/Activity/ActivityManager.cs	
+@@ -731,22 +731,28 @@ public class ActivityManager
+         }
+         else
+         {
+-            if (IsPerformingActivity)
+-            {
+-                Game.DisplayHelp(LanguageStrings.Translate("common.activityBusy", "Cancel existing activity to start"));
+-                return;
+-            }
+-            modItem.UseItem(Actionable, Settings, World, CameraControllable, Intoxicants, Time);
++            TryElectroInventoryUse(modItem);
+         }
+     }
+-    public void DropInventoryItem(ModItem modItem, int amount)
++    internal bool TryElectroInventoryUse(ModItem modItem)
+     {
+         if (IsPerformingActivity)
+         {
+             Game.DisplayHelp(LanguageStrings.Translate("common.activityBusy", "Cancel existing activity to start"));
+-            return;
++            return false;
++        }
++        return modItem.UseItem(Actionable, Settings, World, CameraControllable, Intoxicants, Time);
++    }
++    public void DropInventoryItem(ModItem modItem, int amount) => TryElectroInventoryDrop(modItem, amount);
++
++    internal bool TryElectroInventoryDrop(ModItem modItem, int amount)
++    {
++        if (IsPerformingActivity)
++        {
++            Game.DisplayHelp(LanguageStrings.Translate("common.activityBusy", "Cancel existing activity to start"));
++            return false;
+         }
+-        modItem.DropItem(Actionable, Settings, amount); 
++        return modItem.DropItem(Actionable, Settings, amount);
+     }
+     public void StartScenario()
+     {
+diff --git a/Los Santos RED/lsr/Player/Interaction/PersonTransaction.cs b/Los Santos RED/lsr/Player/Interaction/PersonTransaction.cs
+index 8500d27e10a3d2800dc9111c68780c2ab99400e6..72eea3022cf64e01876a1a5d07192b2c6dce2ff3 100644
+--- a/Los Santos RED/lsr/Player/Interaction/PersonTransaction.cs	
++++ b/Los Santos RED/lsr/Player/Interaction/PersonTransaction.cs	
+@@ -42,6 +42,7 @@ public class PersonTransaction : Interaction
+     private int MoneySpent = 0;
+     public GameLocation AssociatedStore { get; set; }
+     public PedExt TransactionPed => Ped;
++    internal bool ElectroInventoryCanRead => !isPaused && !IsCancelled && !PanickedByPlayer && CanContinueConversation;
+     private bool CanContinueConversation => Player.IsAliveAndFree && Ped.CanConverse && Ped.Pedestrian.Exists() && Ped.Pedestrian.DistanceTo2D(Player.Character) <= 15f;// && Ped.Pedestrian.Speed <= 3.0f;// ((AssociatedStore != null && AssociatedStore.HasVendor && Player.Character.DistanceTo2D(AssociatedStore.VendorPosition) <= 6f) && (Ped.Pedestrian.Exists() && Ped.Pedestrian.DistanceTo2D(Player.Character) <= 6f)) && Player.CanConverse && Ped.CanConverse;
+     public override string DebugString => "";
+     public override bool CanPerformActivities { get; set; } = false;
+diff --git a/Los Santos RED/lsr/UI/Other/VehicleShowcase.cs b/Los Santos RED/lsr/UI/Other/VehicleShowcase.cs
+index 38c1c13bc4e583b9c4bdbdf34e4231f6d6fbd0dd..6ed5926a8d5c19241fbf558bdbc1f501c6231fb3 100644
+--- a/Los Santos RED/lsr/UI/Other/VehicleShowcase.cs	
++++ b/Los Santos RED/lsr/UI/Other/VehicleShowcase.cs	
+@@ -24,6 +24,9 @@ public class VehicleShowcase
+     private int CurrentPosition = 0;
+     private bool IsBig;
+     private bool IsSmall;
++    private static readonly System.Collections.Generic.HashSet<VehicleShowcase> InventoryInputOwners =
++        new System.Collections.Generic.HashSet<VehicleShowcase>();
++    internal static bool ElectroInventoryActive => InventoryInputOwners.Count != 0;
+     private bool IsRunning = false;
+     private ISettingsProvideable Settings;
+     private bool hidelsrUI;
+@@ -52,6 +55,7 @@ public class VehicleShowcase
+         Time.PauseTime();
+         SetupPositions();
+         IsRunning = true;
++        InventoryInputOwners.Add(this);
+         hidelsrUI = Settings.SettingsManager.UIGeneralSettings.HideLSRUIUnlessActionWheelActive;
+         hideRadar = Settings.SettingsManager.UIGeneralSettings.HideRadarUnlessActionWheelActive;
+         Settings.SettingsManager.UIGeneralSettings.HideLSRUIUnlessActionWheelActive = true;
+@@ -133,6 +137,7 @@ public class VehicleShowcase
+                 }
+                 StopImmediately();
+                 IsRunning = false;
++                InventoryInputOwners.Remove(this);
+                 Time.UnPauseTime();
+             }
+             catch (Exception ex)
+@@ -165,6 +170,7 @@ public class VehicleShowcase
+     public void StopImmediately()
+     {
+         IsRunning = false;
++        InventoryInputOwners.Remove(this);
+         NativeFunction.Natives.SET_EVERYONE_IGNORE_PLAYER(Game.LocalPlayer, false);
+         Game.LocalPlayer.Character.IsVisible = true;
+         NativeFunction.Natives.CLEAR_FOCUS();
+diff --git a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs b/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs
+index 54b02a3921fdb496fc53e4af41312ac6a784d07e..951d8ac20b02252bef3bd32527cd3f16804b9dd2 100644
+--- a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs	
++++ b/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs	
+@@ -17,6 +17,8 @@ public class VehicleInteractionMenu
+     protected VehicleDoorSeatData VehicleDoorSeatData;
+     protected IInteractionable Player;
+     public bool IsShowingMenu { get; set; } = false;
++    private UIMenu electroInventoryStorageMenu;
++    private UIMenu electroInventoryItems, electroInventoryWeapons, electroInventoryCash;
+     public VehicleInteractionMenu(VehicleExt vehicleExt)
+     {
+         VehicleExt = vehicleExt;
+@@ -39,6 +41,7 @@ public class VehicleInteractionMenu
+         }
+         UIMenu InventoryWeaponHeaderMenu = MenuPool.AddSubMenu(VehicleInteractMenu, LanguageStrings.Translate("vehicle.storage", "Inventory, Cash, and Weapons"));
+         VehicleInteractMenu.MenuItems[VehicleInteractMenu.MenuItems.Count() - 1].Description = LanguageStrings.Translate("vehicle.storage.description", "Manage Stored Inventory, Cash, and Weapons. Place items, cash, or weapons within storage, or retrieve them for use.");
++        electroInventoryStorageMenu = InventoryWeaponHeaderMenu;
+         InventoryWeaponHeaderMenu.SetBannerType(EntryPoint.LSRedColor);
+         InventoryWeaponHeaderMenu.OnMenuOpen += (sender) =>
+         {
+@@ -83,6 +86,9 @@ public class VehicleInteractionMenu
+         VehicleExt.CashStorage.CreateInteractionMenu(player, MenuPool, InventoryWeaponHeaderMenu, null, !player.IsInVehicle, false);
+ 
+ 
++        electroInventoryItems = VehicleExt.SimpleInventory.ElectroInventoryMenu;
++        electroInventoryWeapons = VehicleExt.WeaponStorage.ElectroInventoryMenu;
++        electroInventoryCash = VehicleExt.CashStorage.ElectroInventoryMenu;
+         VehicleInteractMenu.Visible = true;
+         IsShowingMenu = true;
+         Player.ButtonPrompts.RemovePrompts("VehicleInteract");
+@@ -95,6 +101,18 @@ public class VehicleInteractionMenu
+         VehicleInteractMenu.SetBannerType(EntryPoint.LSRedColor);
+         MenuPool.Add(VehicleInteractMenu);     
+     }
++    private bool IsElectroInventoryStorageVisible() =>
++        (electroInventoryStorageMenu?.Visible == true || electroInventoryItems?.Visible == true
++            || electroInventoryWeapons?.Visible == true || electroInventoryCash?.Visible == true)
++        && Player.IsAliveAndFree
++        && VehicleExt.Vehicle.Exists() && VehicleExt.Vehicle.Speed <= 0.5f
++        && VehicleExt.Vehicle.DistanceTo2D(Game.LocalPlayer.Character) <= 7f
++        && (VehicleExt.HasBeenEnteredByPlayer || VehicleExt.IsOwnedByPlayer);
++
++    private void ReadElectroInventoryStorage(ElectroInventory.Wire.Snapshot snapshot) =>
++        LosSantosRED.lsr.ElectroInventoryPublisher.Storage(snapshot, VehicleExt.GetCarName(),
++            VehicleExt.SimpleInventory, VehicleExt.WeaponStorage, VehicleExt.CashStorage, null, null);
++
+     protected virtual void ProcessMenu()
+     {
+         GameFiber.StartNew(delegate
+@@ -103,6 +121,10 @@ public class VehicleInteractionMenu
+             {
+                 while (EntryPoint.ModController.IsRunning && Player.IsAliveAndFree && MenuPool.IsAnyMenuOpen() && VehicleExt.Vehicle.Exists() && VehicleExt.Vehicle.Speed <= 0.5f && VehicleExt.Vehicle.DistanceTo2D(Game.LocalPlayer.Character) <= 7f)
+                 {
++                    if (IsElectroInventoryStorageVisible())
++                        LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, IsElectroInventoryStorageVisible, ReadElectroInventoryStorage);
++                    else
++                        LosSantosRED.lsr.ElectroInventoryPublisher.Clear(this);
+                     global::UI.ProcessLocalizedMenus(MenuPool);
+                     GameFiber.Yield();
+                 }
+@@ -110,6 +132,7 @@ public class VehicleInteractionMenu
+                 //{
+                 //    Player.ActivityManager.SetDoor(VehicleDoorSeatData.DoorID, true, false);
+                 //}
++                LosSantosRED.lsr.ElectroInventoryPublisher.Clear(this);
+                 IsShowingMenu = false;
+             }
+             catch (Exception ex)
+diff --git a/Los Santos RED/lsr/Weapon/StoredWeapon.cs b/Los Santos RED/lsr/Weapon/StoredWeapon.cs
+index f3a1b1bce01154dc806c0af45d5bd478e88a519f..98f30e1cf72e85de71b84157dc7f8e9d9c87e1b2 100644
+--- a/Los Santos RED/lsr/Weapon/StoredWeapon.cs	
++++ b/Los Santos RED/lsr/Weapon/StoredWeapon.cs	
+@@ -22,6 +22,7 @@ public class StoredWeapon
+     private WeaponItem WeaponItem;
+     private string DisplayName => WeaponItem != null ? WeaponItem.Name : WeaponInformation != null ? WeaponInformation.ModelName : WeaponHash.ToString();
+     private string DisplayDesription => WeaponItem != null ? WeaponItem.GetTypeDescription() : "";
++    internal string ElectroInventoryDisplayName => WeaponItem?.DisplayName ?? DisplayName;
+     public uint WeaponHash { get; set; }
+     public Vector3 CoordinatedDropped { get; set; }
+     public WeaponVariation Variation { get; set; }
