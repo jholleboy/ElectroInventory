@@ -74,3 +74,12 @@ Em save de teste e com ElectroHud V6, use F10 com NPC de compra/venda e com NPC 
 No veículo, entre em Armazenamento pelo LS RED, tanto na raiz quanto nos detalhes de um item. Use setas, Enter, mouse, Esc e gamepad. O pool original não deve navegar nem aparecer durante a concessão e deve voltar no mesmo submenu ao fechar. Confira outro menu independente após devolver o foco. Teste perda de proximidade, movimento do carro e mudança de personagem.
 
 Fora e dentro do veículo, guarde e retire unidades inteiras, inclusive de uma pilha parcialmente consumida. Compare os dois lados. Interrompa a animação após a confirmação e compare de novo. Repita com uma pilha abaixo de uma unidade, item bloqueado, clique duplo e troca de veículo durante a confirmação. Confira que armas e dinheiro continuam sob o menu original. Os testes de console exercitam as regras de árvore/pool, abas sem oferta executável, validação inteira e expiração, sem rodar a lógica nativa de GTA V.
+
+## Rodada integrada V4
+
+Os testes de console cobrem o novo payload com arma equipada, arma carregada sem munição, proteção, personagem/sessão incorretos, dados incompletos e leitura pelo codec existente. Também cobrem opções contextuais autorizadas, revisão que cancela confirmação, token inválido, ausência de executor de armas/dinheiro, unidades inteiras e resíduos. Os testes anteriores mantêm Esc, F10, foco, clique duplicado, expiração e devolução de entrada.
+
+1. Em save de teste, compare F1 Equipamentos com arma equipada e colete da RC2. Troque de arma, dispare e mude de personagem. Verifique munição zero e lista sem armas.
+2. Em veículo/imóvel, compare armas, munição, saldo e teto com o menu original. Use a saída explícita e verifique Guardar/Retirar, depósito e retirada pelas opções nativas. O overlay não emite essas operações especializadas.
+3. Em itens comuns, use clique direito e a tecla Menu. Confirme que Informações não executa ação e que ações autorizadas exigem confirmação. Mude de sessão durante o menu, faça clique duplo e feche com Esc ou F10. Repita com NPC, comércio e ElectroHud V6.
+4. Guarde e retire unidades inteiras de uma pilha com resíduo. Interrompa a animação de veículo depois da confirmação e compare as duas pontas. Confira proteção de contexto e foco ao descarregar o plugin e ao retornar ao menu original.

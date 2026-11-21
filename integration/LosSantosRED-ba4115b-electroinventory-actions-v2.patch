@@ -1,11 +1,12 @@
 diff --git a/Los Santos RED/ElectroInventoryActionProtocol.cs b/Los Santos RED/ElectroInventoryActionProtocol.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..2df149d7af38fe4230db39aaf82f69e18d47ec4b
+index 0000000000000000000000000000000000000000..1ddcf15433f0d9b748d4f208e8d29d9268a4f33b
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryActionProtocol.cs	
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,129 @@
 +using System;
 +using System.Collections.Generic;
++using System.IO;
 +using System.IO.MemoryMappedFiles;
 +using System.Threading;
 +
@@ -39,8 +40,18 @@ index 0000000000000000000000000000000000000000..2df149d7af38fe4230db39aaf82f69e1
 +        public static Snapshot ReadEquipment(byte[] payload, Guid session, int character)
 +        {
 +            if (payload == null || payload.Length == 0 || payload.Length > EquipmentCapacity) return null;
-+            var value = Protocol.Decode(payload);
-+            return value.Session == session && value.Character == character && value.Mode == 0 ? value : null;
++            try
++            {
++                var value = Protocol.Decode(payload);
++                if (value.Session != session || value.Character != character || value.Mode != 0 ||
++                    value.Rows.Exists(row => row.Group > 2 || double.IsNaN(row.Quantity)))
++                    return null;
++                return value;
++            }
++            catch (Exception error) when (error is IOException || error is ArgumentException || error is InvalidDataException)
++            {
++                return null;
++            }
 +        }
 +
 +        public static readonly long FocusLifetime = System.Diagnostics.Stopwatch.Frequency * 3 / 4;

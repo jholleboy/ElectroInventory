@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Threading;
 
@@ -33,8 +34,18 @@ namespace ElectroInventory.Wire
         public static Snapshot ReadEquipment(byte[] payload, Guid session, int character)
         {
             if (payload == null || payload.Length == 0 || payload.Length > EquipmentCapacity) return null;
-            var value = Protocol.Decode(payload);
-            return value.Session == session && value.Character == character && value.Mode == 0 ? value : null;
+            try
+            {
+                var value = Protocol.Decode(payload);
+                if (value.Session != session || value.Character != character || value.Mode != 0 ||
+                    value.Rows.Exists(row => row.Group > 2 || double.IsNaN(row.Quantity)))
+                    return null;
+                return value;
+            }
+            catch (Exception error) when (error is IOException || error is ArgumentException || error is InvalidDataException)
+            {
+                return null;
+            }
         }
 
         public static readonly long FocusLifetime = System.Diagnostics.Stopwatch.Frequency * 3 / 4;

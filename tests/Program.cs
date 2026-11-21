@@ -14,6 +14,7 @@ internal static class Program
     private static void Main()
     {
         CheckOverlayInput();
+        CheckV4();
         CheckV31();
         CheckV3();
         CheckFocusAndClicks();
@@ -282,6 +283,44 @@ internal static class Program
             Require(!ActionProtocol.Authorize(command, session, Guid.NewGuid(), offer)); // replay
         }
         Console.WriteLine("V3.1: árvore nativa, pool, NPC somente leitura, Guardar/Retirar e invalidação passaram.");
+    }
+
+    private static void CheckV4()
+    {
+        Guid session = Guid.NewGuid();
+        var gear = new Snapshot { Session = session, Character = 312 };
+        gear.Rows.Add(new Entry { Group = 0, Name = "Colete", Quantity = 54 });
+        gear.Rows.Add(new Entry { Group = 1, Name = "Arma equipada", Quantity = 17 });
+        gear.Rows.Add(new Entry { Group = 2, Name = "Arma carregada", Quantity = 0 });
+        var bytes = Protocol.Encode(gear);
+        var decoded = ActionProtocol.ReadEquipment(bytes, session, 312);
+        Require(decoded != null && decoded.Rows[0].Quantity == 54 && decoded.Rows[1].Group == 1
+            && decoded.Rows[1].Quantity == 17 && decoded.Rows[2].Quantity == 0);
+        Require(ActionProtocol.ReadEquipment(bytes, session, 313) == null);
+        Require(ActionProtocol.ReadEquipment(bytes, Guid.NewGuid(), 312) == null);
+        Require(ActionProtocol.ReadEquipment(new byte[] { 1, 2 }, session, 312) == null);
+        Require(ActionProtocol.ReadEquipment(new byte[ActionProtocol.EquipmentCapacity + 1], session, 312) == null);
+        gear.Rows.Add(new Entry { Group = 3, Quantity = 500 });
+        Require(ActionProtocol.ReadEquipment(Protocol.Encode(gear), session, 312) == null);
+        Require(Protocol.Decode(bytes).Rows.Count == 3); // base payload stays readable
+        Require(ActionProtocol.EquipmentPayload + ActionProtocol.EquipmentCapacity == ActionProtocol.Capacity);
+
+        var selection = new ElectroInventory.ActionSelection();
+        Guid revision = Guid.NewGuid();
+        var offer = new ActionOffer { Token = Guid.NewGuid(), Kinds = ActionKind.Use | ActionKind.Discard, Maximum = 3 };
+        selection.Bind(revision, offer);
+        Require(selection.AuthorizedKinds().Length == 2 && !selection.Choose(ActionKind.Take));
+        Require(selection.Choose(ActionKind.Discard));
+        selection.Confirming = true;
+        selection.Bind(Guid.NewGuid(), offer);
+        Require(!selection.Confirming);
+        selection.Bind(revision, new ActionOffer { Token = Guid.Empty, Kinds = ActionKind.Deposit, Maximum = 10 });
+        Require(!selection.Choose(ActionKind.Deposit));
+        selection.Bind(revision, null);
+        Require(!selection.Choose(ActionKind.Take)); // cash and weapons without a bridge executor
+        Require(ActionProtocol.ExactTransfer(2.5f, .25f, 1));
+        Require(!ActionProtocol.ExactTransfer(.5f, .25f, 1));
+        Console.WriteLine("V4: proteção, armas, munição, extensão inválida, contexto e ações restritas passaram.");
     }
 
     private static void CheckOverlayInput()
