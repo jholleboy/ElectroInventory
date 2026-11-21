@@ -1,9 +1,9 @@
 diff --git a/Los Santos RED/ElectroInventoryActionProtocol.cs b/Los Santos RED/ElectroInventoryActionProtocol.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..fba0c26593bc6b0807f92d794c49d9ff88da392d
+index 0000000000000000000000000000000000000000..2df149d7af38fe4230db39aaf82f69e18d47ec4b
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryActionProtocol.cs	
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,118 @@
 +using System;
 +using System.Collections.Generic;
 +using System.IO.MemoryMappedFiles;
@@ -34,6 +34,15 @@ index 0000000000000000000000000000000000000000..fba0c26593bc6b0807f92d794c49d9ff
 +    {
 +        public const int Magic = 0x45494132, Capacity = 65536, Offers = 160, OfferSize = 24;
 +        public const int FocusRequest = 49000, FocusGrant = 49024, DiagnosticsFlag = 49048, FocusPolicy = 49052;
++        public const int EquipmentStamp = 49100, EquipmentLength = 49108, EquipmentPayload = 49112;
++        public const int EquipmentCapacity = Capacity - EquipmentPayload;
++        public static Snapshot ReadEquipment(byte[] payload, Guid session, int character)
++        {
++            if (payload == null || payload.Length == 0 || payload.Length > EquipmentCapacity) return null;
++            var value = Protocol.Decode(payload);
++            return value.Session == session && value.Character == character && value.Mode == 0 ? value : null;
++        }
++
 +        public static readonly long FocusLifetime = System.Diagnostics.Stopwatch.Frequency * 3 / 4;
 +        public static readonly long FocusClientMargin = System.Diagnostics.Stopwatch.Frequency / 10;
 +
@@ -115,10 +124,10 @@ index 0000000000000000000000000000000000000000..fba0c26593bc6b0807f92d794c49d9ff
 +}
 diff --git a/Los Santos RED/ElectroInventoryActionServer.cs b/Los Santos RED/ElectroInventoryActionServer.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..af394f1531590c9cefa14c55764545ef3150d16f
+index 0000000000000000000000000000000000000000..fdc13845ccc787529ea20e03272000cd2ffa3b1d
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryActionServer.cs	
-@@ -0,0 +1,177 @@
+@@ -0,0 +1,184 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Diagnostics;
@@ -149,7 +158,7 @@ index 0000000000000000000000000000000000000000..af394f1531590c9cefa14c55764545ef
 +        private string lastDiagnostic;
 +
 +        internal void Update(int pid, long stamp, Snapshot snapshot, byte[] payload,
-+            List<InventoryActionBinding> current, bool focusEligible)
++            List<InventoryActionBinding> current, bool focusEligible, byte[] equipment)
 +        {
 +            if (disabled || executing) return;
 +            ActionCommand command = null;
@@ -236,6 +245,13 @@ index 0000000000000000000000000000000000000000..af394f1531590c9cefa14c55764545ef
 +                    }
 +                    ActionProtocol.WriteGuid(view, 40, replyId);
 +                    view.Write(56, (byte)reply);
++                    view.Write(ActionProtocol.EquipmentStamp, 0L);
++                    view.Write(ActionProtocol.EquipmentLength, equipment?.Length ?? 0);
++                    if (equipment != null)
++                    {
++                        view.WriteArray(ActionProtocol.EquipmentPayload, equipment, 0, equipment.Length);
++                        view.Write(ActionProtocol.EquipmentStamp, stamp);
++                    }
 +                    if (selected == null) view.Write(8, stamp);
 +                    previous = payload;
 +                    bindings = current;
@@ -441,10 +457,10 @@ index 0000000000000000000000000000000000000000..0af08027e3e9c38830b3d850e2708d9c
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..a717bdbd279e83001c33a2f44ebb4d01e897fbfb
+index 0000000000000000000000000000000000000000..44ae07a3cc2e881069a33197887dc319f40b475f
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
-@@ -0,0 +1,352 @@
+@@ -0,0 +1,386 @@
 +using ElectroInventory.Wire;
 +using Rage;
 +using System;
@@ -705,6 +721,39 @@ index 0000000000000000000000000000000000000000..a717bdbd279e83001c33a2f44ebb4d01
 +            }
 +        }
 +
++        private static byte[] ReadEquipment(ModController controller, Snapshot current)
++        {
++            if (current.Mode == 2) return null;
++            var player = controller.Player;
++            var ped = player.Character;
++            var gear = new Snapshot { Mode = 0, Character = current.Character, Session = current.Session,
++                Title = "Equipamentos do personagem" };
++            gear.Rows.Add(new Entry { Group = 0, Id = "armor", Category = "Proteção",
++                Name = player.ArmorManager.EquippedArmorItem?.DisplayName ?? "Proteção atual",
++                Quantity = Math.Max(0, ped.Armor), Detail = "Pontos de proteção. Colete gerenciado pelo LS RED quando identificado." });
++            var inventory = ped.Inventory;
++            var equipped = inventory.EquippedWeapon;
++            // Read the native descriptors directly. StoreWeapons() mutates LS RED state.
++            foreach (Rage.WeaponDescriptor weapon in inventory.Weapons)
++            {
++                if (gear.Rows.Count >= 81) { gear.Incomplete = true; break; }
++                uint hash = (uint)weapon.Hash;
++                var item = controller.ModDataFileManager.ModItems.GetWeapon(hash);
++                var weaponInfo = controller.ModDataFileManager.Weapons.GetWeapon((ulong)hash);
++                gear.Rows.Add(new Entry { Group = equipped != null && (uint)equipped.Hash == hash ? (byte)1 : (byte)2,
++                    Id = hash.ToString(), Category = "Armas", Name = item?.DisplayName ?? weaponInfo?.ModelName ?? hash.ToString(),
++                    Quantity = Math.Max(0, (int)weapon.Ammo), Detail = "Munição reportada pelo GTA V." });
++            }
++            byte[] bytes = Protocol.Encode(gear);
++            while (bytes.Length > ActionProtocol.EquipmentCapacity && gear.Rows.Count > 1)
++            {
++                gear.Incomplete = true;
++                gear.Rows.RemoveAt(gear.Rows.Count - 1);
++                bytes = Protocol.Encode(gear);
++            }
++            return bytes.Length <= ActionProtocol.EquipmentCapacity ? bytes : null;
++        }
++
 +        internal void Publish(ModController controller)
 +        {
 +            if (disabled) return;
@@ -764,7 +813,8 @@ index 0000000000000000000000000000000000000000..a717bdbd279e83001c33a2f44ebb4d01
 +                }
 +                finally { if (held) mutex.ReleaseMutex(); }
 +                actions.Update(pid, stamp, snapshot, payload, bindings,
-+                    snapshot.Mode != 0 && !snapshot.NativeTradeOnly && focusPool != null && ContextStillValid(controller, snapshot));
++                    snapshot.Mode != 0 && !snapshot.NativeTradeOnly && focusPool != null && ContextStillValid(controller, snapshot),
++                    ReadEquipment(controller, snapshot));
 +            }
 +            catch (ThreadAbortException) { throw; }
 +            catch (Exception e)

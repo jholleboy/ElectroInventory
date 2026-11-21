@@ -19,13 +19,15 @@ namespace ElectroInventory
         public Guid Revision { get; private set; }
         public ActionOffer[] Offers { get; private set; } = new ActionOffer[0];
         private long nativeTradeStamp;
+        private byte[] equipmentBytes;
+        public Snapshot Equipment { get; private set; }
         public bool NativeTradeOnly(long stamp) => stamp > 0 && nativeTradeStamp == stamp;
         public bool Busy => pending != Guid.Empty;
         public ActionResult Result { get; private set; }
 
         public ActionClient(int pid, bool diagnostics = false) { this.pid = pid; this.diagnostics = diagnostics; }
 
-        public void Poll(long snapshotStamp, int rows)
+        public void Poll(long snapshotStamp, int rows, Guid session, int character)
         {
             try
             {
@@ -60,6 +62,19 @@ namespace ElectroInventory
                         Offers = new ActionOffer[0];
                         return;
                     }
+                    int equipmentLength = view.ReadInt32(ActionProtocol.EquipmentLength);
+                    if (equipmentLength > 0 && equipmentLength <= ActionProtocol.EquipmentCapacity
+                        && view.ReadInt64(ActionProtocol.EquipmentStamp) == stamp)
+                    {
+                        var bytes = new byte[equipmentLength];
+                        view.ReadArray(ActionProtocol.EquipmentPayload, bytes, 0, equipmentLength);
+                        if (equipmentBytes == null || !System.Linq.Enumerable.SequenceEqual(bytes, equipmentBytes))
+                        {
+                            Equipment = ActionProtocol.ReadEquipment(bytes, session, character);
+                            equipmentBytes = bytes;
+                        }
+                    }
+                    else { Equipment = null; equipmentBytes = null; }
                     nativeTradeStamp = view.ReadInt32(ActionProtocol.FocusPolicy) == 2 ? stamp : 0;
                     Guid revision = ActionProtocol.ReadGuid(view, 16);
                     if (revision == Revision) return;
@@ -143,6 +158,8 @@ namespace ElectroInventory
             Revision = pending = Guid.Empty;
             Offers = new ActionOffer[0];
             nativeTradeStamp = 0;
+            Equipment = null;
+            equipmentBytes = null;
         }
     }
 }

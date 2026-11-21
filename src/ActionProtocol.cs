@@ -28,6 +28,15 @@ namespace ElectroInventory.Wire
     {
         public const int Magic = 0x45494132, Capacity = 65536, Offers = 160, OfferSize = 24;
         public const int FocusRequest = 49000, FocusGrant = 49024, DiagnosticsFlag = 49048, FocusPolicy = 49052;
+        public const int EquipmentStamp = 49100, EquipmentLength = 49108, EquipmentPayload = 49112;
+        public const int EquipmentCapacity = Capacity - EquipmentPayload;
+        public static Snapshot ReadEquipment(byte[] payload, Guid session, int character)
+        {
+            if (payload == null || payload.Length == 0 || payload.Length > EquipmentCapacity) return null;
+            var value = Protocol.Decode(payload);
+            return value.Session == session && value.Character == character && value.Mode == 0 ? value : null;
+        }
+
         public static readonly long FocusLifetime = System.Diagnostics.Stopwatch.Frequency * 3 / 4;
         public static readonly long FocusClientMargin = System.Diagnostics.Stopwatch.Frequency / 10;
 
