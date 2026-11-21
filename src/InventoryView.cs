@@ -9,12 +9,13 @@ namespace ElectroInventory
     internal sealed class Navigation
     {
         public string Query = "", Category = "";
-        public bool Search, Equipment;
+        public bool Search, Equipment, Quick;
+        public readonly HashSet<Entry> Usable = new HashSet<Entry>();
         public int Selected, Offset, CategoryOffset;
         private int otherSelected;
         public bool Right;
         public readonly TradeTabs Trade = new TradeTabs();
-        public void Reset() { Query = Category = ""; Search = Right = Equipment = false; Selected = Offset = CategoryOffset = otherSelected = 0; }
+        public void Reset() { Query = Category = ""; Search = Right = Equipment = Quick = false; Selected = Offset = CategoryOffset = otherSelected = 0; }
         public void Filter(string category) { Category = category; Selected = Offset = otherSelected = 0; }
         public int Selection(bool right) => right == Right ? Selected : otherSelected;
         public void Select(bool right, int index)
@@ -30,6 +31,7 @@ namespace ElectroInventory
         public void ToggleEquipment()
         {
             Equipment = !Equipment;
+            Quick = false;
             Query = "";
             Search = false;
             Select(false, 0);
@@ -79,6 +81,7 @@ namespace ElectroInventory
             var compare = System.Globalization.CultureInfo.GetCultureInfo("pt-BR").CompareInfo;
             return snapshot.Rows.Where(row => (snapshot.Mode != 1 || (row.Group != 0) == right)
                 && (snapshot.Mode != 2 || row.Group == nav.Trade.Current)
+                && (!nav.Quick || nav.Usable.Contains(row))
                 && (nav.Category.Length == 0 || row.Category == nav.Category)
                 && compare.IndexOf(row.Name ?? "", nav.Query, System.Globalization.CompareOptions.IgnoreCase |
                     System.Globalization.CompareOptions.IgnoreNonSpace) >= 0).ToList();
@@ -118,6 +121,9 @@ namespace ElectroInventory
                     Button(g, new Rectangle(914, 99, 456, 46),
                         (nav.Search ? "⌕  › " : "⌕  ") + (nav.Query.Length == 0 ? "Pesquisar por nome" : nav.Query),
                         () => nav.Search = true, nav.Search);
+                if (ownsInput && !nav.Equipment && snapshot.Mode == 0 && (nav.Quick || nav.Usable.Count > 0))
+                    Button(g, new Rectangle(1110, 150, 260, 30), nav.Quick ? "Mostrar todos os itens" : "Acesso rápido · Itens utilizáveis",
+                        () => { nav.Quick = !nav.Quick; nav.Filter(""); }, nav.Quick);
                 if (!double.IsNaN(snapshot.Balance))
                     Text(g, "Saldo aplicável  $ " + Quantity(snapshot.Balance), 1004, 149, 355, 30, 19, Cyan, true);
 

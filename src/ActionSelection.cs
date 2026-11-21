@@ -15,6 +15,8 @@ namespace ElectroInventory
 
         public void Bind(Guid revision, ActionOffer offer)
         {
+            if (revision == Guid.Empty || offer?.Token == Guid.Empty || offer?.Maximum <= 0)
+                offer = null;
             if (Revision == revision && Offer?.Token == offer?.Token) return;
             Revision = revision;
             Offer = offer;

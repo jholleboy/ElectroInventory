@@ -124,6 +124,14 @@ namespace ElectroInventory
                     var revisionNow = actions?.Revision ?? Guid.Empty;
                     var resultNow = actions?.Result ?? ActionResult.None;
                     refresh |= revisionNow != lastRevision || resultNow != lastResult;
+                    nav.Usable.Clear();
+                    if (sample?.Mode == 0 && revisionNow != Guid.Empty)
+                        for (int index = 0; index < Math.Min(sample.Rows.Count, actions.Offers.Length); index++)
+                        {
+                            var entry = actions.Offers[index];
+                            if (entry != null && entry.Token != Guid.Empty && entry.Maximum > 0 && (entry.Kinds & ActionKind.Use) != 0)
+                                nav.Usable.Add(sample.Rows[index]);
+                        }
                     lastRevision = revisionNow;
                     if (lastResult != resultNow && resultNow == ActionResult.Success)
                         nextRead = 0;
@@ -206,7 +214,8 @@ namespace ElectroInventory
                 {
                     // Keep the original pool paused through the release of an overlay click.
                     BlockMouseClick();
-                    if (NativeFunction.Natives.IS_DISABLED_CONTROL_PRESSED<bool>(0, 237))
+                    if (NativeFunction.Natives.IS_DISABLED_CONTROL_PRESSED<bool>(0, 237) ||
+                        NativeFunction.Natives.IS_DISABLED_CONTROL_PRESSED<bool>(0, 238))
                         actions?.UpdateFocus(releaseSession);
                     else releaseSession = Guid.Empty;
                 }
@@ -233,7 +242,7 @@ namespace ElectroInventory
                 if (open)
                 {
                     var gear = actions?.Equipment;
-                    if (gear?.Session != sample.Session || gear.Character != sample.Character)
+                    if (gear?.Session != sample.Session || gear.Character != sample.Character || actions.EquipmentStamp != sample.PublicationStamp)
                         gear = null;
                     if (gear == null) nav.Equipment = false;
                     var displayed = nav.Equipment ? gear : sample;

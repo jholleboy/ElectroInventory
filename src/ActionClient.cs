@@ -20,6 +20,7 @@ namespace ElectroInventory
         public ActionOffer[] Offers { get; private set; } = new ActionOffer[0];
         private long nativeTradeStamp;
         private byte[] equipmentBytes;
+        public long EquipmentStamp { get; private set; }
         public Snapshot Equipment { get; private set; }
         public bool NativeTradeOnly(long stamp) => stamp > 0 && nativeTradeStamp == stamp;
         public bool Busy => pending != Guid.Empty;
@@ -66,6 +67,7 @@ namespace ElectroInventory
                     if (equipmentLength > 0 && equipmentLength <= ActionProtocol.EquipmentCapacity
                         && view.ReadInt64(ActionProtocol.EquipmentStamp) == stamp)
                     {
+                        EquipmentStamp = stamp;
                         var bytes = new byte[equipmentLength];
                         view.ReadArray(ActionProtocol.EquipmentPayload, bytes, 0, equipmentLength);
                         if (equipmentBytes == null || !System.Linq.Enumerable.SequenceEqual(bytes, equipmentBytes))
@@ -74,7 +76,7 @@ namespace ElectroInventory
                             equipmentBytes = bytes;
                         }
                     }
-                    else { Equipment = null; equipmentBytes = null; }
+                    else { Equipment = null; equipmentBytes = null; EquipmentStamp = 0; }
                     nativeTradeStamp = view.ReadInt32(ActionProtocol.FocusPolicy) == 2 ? stamp : 0;
                     Guid revision = ActionProtocol.ReadGuid(view, 16);
                     if (revision == Revision) return;
@@ -158,6 +160,7 @@ namespace ElectroInventory
             Revision = pending = Guid.Empty;
             Offers = new ActionOffer[0];
             nativeTradeStamp = 0;
+            EquipmentStamp = 0;
             Equipment = null;
             equipmentBytes = null;
         }
