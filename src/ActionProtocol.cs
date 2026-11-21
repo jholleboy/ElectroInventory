@@ -36,6 +36,23 @@ namespace ElectroInventory.Wire
             && command.Quantity > 0 && command.Quantity <= offer.Maximum
             && (command.Kind != ActionKind.Use || command.Quantity == 1);
 
+        public static bool ExactTransfer(float from, float to, int quantity)
+        {
+            if (quantity <= 0 || float.IsNaN(from) || float.IsInfinity(from) ||
+                float.IsNaN(to) || float.IsInfinity(to) || to < 0 || from < quantity)
+                return false;
+            // Reject amounts where float arithmetic would lose a fractional residue.
+            return (double)(from - quantity) == (double)from - quantity &&
+                (double)(to + quantity) == (double)to + quantity;
+        }
+
+        public static bool ValidPrice(int unit, int quantity, int balance, bool buy)
+        {
+            if (unit < 0 || quantity <= 0 || balance < 0) return false;
+            long total = (long)unit * quantity;
+            return buy ? total <= balance : total <= int.MaxValue - (long)balance;
+        }
+
         private static bool ValidKind(ActionKind kind) => kind == ActionKind.Use || kind == ActionKind.Discard
             || kind == ActionKind.Deposit || kind == ActionKind.Take || kind == ActionKind.Buy || kind == ActionKind.Sell;
 

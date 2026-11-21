@@ -11,6 +11,7 @@ namespace ElectroInventory.Wire
         public string Id, Name, Category, Description, Detail;
         public double Quantity = double.NaN;
         public double Price = double.NaN;
+        internal object TradeBinding;
         public byte Group; // 0 player/items, 1 stored items, 2 weapons, 3 cash, 4 buy, 5 sell
     }
 

@@ -1,9 +1,9 @@
 diff --git a/Los Santos RED/ElectroInventoryActionProtocol.cs b/Los Santos RED/ElectroInventoryActionProtocol.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..ff1f0a4ef776b9414c88e50b4f9b316230e39b52
+index 0000000000000000000000000000000000000000..fbe3977a403427a26119bc0d952e5453fb836f55
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryActionProtocol.cs	
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,78 @@
 +using System;
 +using System.IO.MemoryMappedFiles;
 +using System.Threading;
@@ -41,6 +41,23 @@ index 0000000000000000000000000000000000000000..ff1f0a4ef776b9414c88e50b4f9b3162
 +            && ValidKind(command.Kind) && (offer.Kinds & command.Kind) != 0
 +            && command.Quantity > 0 && command.Quantity <= offer.Maximum
 +            && (command.Kind != ActionKind.Use || command.Quantity == 1);
++
++        public static bool ExactTransfer(float from, float to, int quantity)
++        {
++            if (quantity <= 0 || float.IsNaN(from) || float.IsInfinity(from) ||
++                float.IsNaN(to) || float.IsInfinity(to) || to < 0 || from < quantity)
++                return false;
++            // Reject amounts where float arithmetic would lose a fractional residue.
++            return (double)(from - quantity) == (double)from - quantity &&
++                (double)(to + quantity) == (double)to + quantity;
++        }
++
++        public static bool ValidPrice(int unit, int quantity, int balance, bool buy)
++        {
++            if (unit < 0 || quantity <= 0 || balance < 0) return false;
++            long total = (long)unit * quantity;
++            return buy ? total <= balance : total <= int.MaxValue - (long)balance;
++        }
 +
 +        private static bool ValidKind(ActionKind kind) => kind == ActionKind.Use || kind == ActionKind.Discard
 +            || kind == ActionKind.Deposit || kind == ActionKind.Take || kind == ActionKind.Buy || kind == ActionKind.Sell;
@@ -222,10 +239,10 @@ index 0000000000000000000000000000000000000000..8c480426685048baace6e9648879f140
 +}
 diff --git a/Los Santos RED/ElectroInventoryProtocol.cs b/Los Santos RED/ElectroInventoryProtocol.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..4acd3296554e729707179d0bf44169e8e6c95991
+index 0000000000000000000000000000000000000000..840981c46fecb61af1c6df5970601517347c6135
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryProtocol.cs	
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,135 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Diagnostics;
@@ -239,6 +256,7 @@ index 0000000000000000000000000000000000000000..4acd3296554e729707179d0bf44169e8
 +        public string Id, Name, Category, Description, Detail;
 +        public double Quantity = double.NaN;
 +        public double Price = double.NaN;
++        internal object TradeBinding;
 +        public byte Group; // 0 player/items, 1 stored items, 2 weapons, 3 cash, 4 buy, 5 sell
 +    }
 +
@@ -362,10 +380,10 @@ index 0000000000000000000000000000000000000000..4acd3296554e729707179d0bf44169e8
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..0f1250cc8b4bdeec5c94079e7e359de5754fadcd
+index 0000000000000000000000000000000000000000..93a940ebd0eeacb2a113cd084404e2b1d2ef4895
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
-@@ -0,0 +1,269 @@
+@@ -0,0 +1,278 @@
 +using ElectroInventory.Wire;
 +using Rage;
 +using System;
@@ -491,14 +509,22 @@ index 0000000000000000000000000000000000000000..0f1250cc8b4bdeec5c94079e7e359de5
 +                        return ActionResult.Expired;
 +                    var destination = target.Find(candidate => candidate.ModItem?.Name == row.Id);
 +                    if (destination != target.FindLast(candidate => candidate.ModItem?.Name == row.Id)
-+                        || (destination != null && (float.IsNaN(destination.RemainingPercent) ||
-+                            float.IsInfinity(destination.RemainingPercent) || destination.RemainingPercent < 0 ||
-+                            destination.RemainingPercent + command.Quantity - destination.RemainingPercent != command.Quantity)))
++                        || controller.ModDataFileManager.ModItems.Get(row.Id) == null
++                        || !ActionProtocol.ExactTransfer(item.RemainingPercent, destination?.RemainingPercent ?? 0, command.Quantity))
 +                        return ActionResult.Rejected;
 +                    return item.ModItem.TransferElectroInventory(player, authority.Items, command.Quantity, take, false)
 +                        ? ActionResult.Success : ActionResult.Rejected;
 +                }
 +            };
++        }
++
++        private static InventoryActionBinding TradeBinding(ModController controller, Snapshot snapshot, Entry row)
++        {
++            var binding = row.TradeBinding as InventoryActionBinding;
++            if (binding == null) return null;
++            var execute = binding.Execute;
++            binding.Execute = command => ContextStillValid(controller, snapshot) ? execute(command) : ActionResult.Expired;
++            return binding;
 +        }
 +
 +        internal static void Storage(Snapshot snapshot, string title, SimpleInventory items,
@@ -601,7 +627,8 @@ index 0000000000000000000000000000000000000000..0f1250cc8b4bdeec5c94079e7e359de5
 +                }
 +                finally { if (held) mutex.ReleaseMutex(); }
 +                var bindings = snapshot.Rows.ConvertAll(row => snapshot.Mode == 1
-+                    ? StorageBinding(controller, snapshot, row) : PersonalBinding(controller, snapshot, row));
++                    ? StorageBinding(controller, snapshot, row) : snapshot.Mode == 2
++                    ? TradeBinding(controller, snapshot, row) : PersonalBinding(controller, snapshot, row));
 +                actions.Update(pid, stamp, snapshot, payload, bindings);
 +            }
 +            catch (ThreadAbortException) { throw; }
@@ -782,10 +809,10 @@ index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..e1f92cfae0085dc65c4a76d6ae75ed47
          Player.ActivityManager.IsInteractingWithLocation = false;
          Player.IsTransacting = false;
 diff --git a/Los Santos RED/lsr/Locations/Places/Transaction.cs b/Los Santos RED/lsr/Locations/Places/Transaction.cs
-index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..4daec5ec022c850a5283b2a5fb5c2ff4f988ccce 100644
+index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..20241d936ae3f1367016c77c84b4d2fc842e1e4e 100644
 --- a/Los Santos RED/lsr/Locations/Places/Transaction.cs	
 +++ b/Los Santos RED/lsr/Locations/Places/Transaction.cs	
-@@ -63,8 +63,77 @@ public class Transaction
+@@ -63,8 +63,140 @@ public class Transaction
      {
  
      }
@@ -809,6 +836,67 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..4daec5ec022c850a5283b2a5fb5c2ff4
 +
 +    private bool IsElectroInventoryTradeVisible() => ElectroInventoryUnavailable() == null;
 +
++    private LosSantosRED.lsr.InventoryActionBinding ElectroInventoryOffer(ModItem item, MenuItem offer, bool buy)
++    {
++        // NPC transactions and overridden store effects may yield or reopen a native menu.
++        if (PersonTransaction != null || Store == null || IsStealing || item.ConsumeOnPurchase
++            || item is WeaponItem || item is VehicleItem || item.ItemType == ItemType.Services
++            || typeof(ModItem) != item.GetType().GetMethod(buy ? nameof(ModItem.CreatePurchaseMenuItem) :
++                nameof(ModItem.CreateSellMenuItem))?.DeclaringType
++            || typeof(GameLocation) != Store.GetType().GetMethod(buy ? nameof(GameLocation.OnItemPurchased) :
++                nameof(GameLocation.OnItemSold))?.DeclaringType
++            || ShopMenu.Items.Count(x => x.ModItemName == offer.ModItemName) != 1)
++            return null;
++
++        int unit = buy ? offer.PurchasePrice : offer.SalesPrice;
++        int maximum = ElectroInventoryLimit(item, offer, buy);
++        if (unit < 0 || maximum <= 0 || (buy && (offer.MinimumPurchaseAmount != 1 || offer.PurchaseIncrement != 1)))
++            return null;
++        return new LosSantosRED.lsr.InventoryActionBinding
++        {
++            Identity = offer,
++            Offer = new ElectroInventory.Wire.ActionOffer
++            {
++                Token = Guid.NewGuid(), Maximum = maximum,
++                Kinds = buy ? ElectroInventory.Wire.ActionKind.Buy : ElectroInventory.Wire.ActionKind.Sell
++            },
++            Execute = command =>
++            {
++                if (!IsElectroInventoryTradeVisible() || IsStealing || electroInventoryPlayer.ActivityManager.IsPerformingActivity
++                    || ShopMenu.Items.Count(x => x.ModItemName == offer.ModItemName) != 1 || !ShopMenu.Items.Contains(offer)
++                    || electroInventoryItems.Get(offer.ModItemName) != item || (buy ? offer.PurchasePrice : offer.SalesPrice) != unit
++                    || (buy && (!offer.Purchaseable || offer.MinimumPurchaseAmount != 1 || offer.PurchaseIncrement != 1))
++                    || (!buy && !offer.Sellable) || command.Quantity > ElectroInventoryLimit(item, offer, buy))
++                    return ElectroInventory.Wire.ActionResult.Expired;
++                int balance = electroInventoryPlayer.BankAccounts.GetMoney(UseAccounts);
++                long units = (long)command.Quantity * (buy ? item.AmountPerPackage : 1);
++                var existing = electroInventoryPlayer.Inventory.Get(item);
++                var duplicates = electroInventoryPlayer.Inventory.ItemsList.Count(x => x.ModItem?.Name == item.Name);
++                if (!ElectroInventory.Wire.ActionProtocol.ValidPrice(unit, command.Quantity, balance, buy)
++                    || units <= 0 || units > int.MaxValue || duplicates > 1
++                    || (buy && !ElectroInventory.Wire.ActionProtocol.ExactTransfer((float)units, existing?.RemainingPercent ?? 0, (int)units))
++                    || (!buy && (existing == null ||
++                        !ElectroInventory.Wire.ActionProtocol.ExactTransfer(existing.RemainingPercent, 0, command.Quantity))))
++                    return ElectroInventory.Wire.ActionResult.Rejected;
++                bool success = buy ? item.PurchaseItem(this, electroInventoryPlayer, offer, command.Quantity, false)
++                    : item.SellItem(this, electroInventoryPlayer, offer, command.Quantity, false);
++                return success ? ElectroInventory.Wire.ActionResult.Success : ElectroInventory.Wire.ActionResult.Rejected;
++            }
++        };
++    }
++
++    private int ElectroInventoryLimit(ModItem item, MenuItem offer, bool buy)
++    {
++        if (buy)
++            return offer.NumberOfItemsToSellToPlayer < 0 ? offer.MaximumPurchaseAmount :
++                (int)Math.Max(0, Math.Min(offer.MaximumPurchaseAmount, (long)offer.NumberOfItemsToSellToPlayer - offer.NumberOfItemsSoldToPlayer));
++        float quantity = electroInventoryPlayer.Inventory.Get(item)?.RemainingPercent ?? 0;
++        if (float.IsNaN(quantity) || float.IsInfinity(quantity) || quantity <= 0 || quantity >= int.MaxValue) return 0;
++        int owned = (int)Math.Floor(quantity);
++        return offer.NumberOfItemsToPurchaseFromPlayer < 0 ? owned : (int)Math.Max(0,
++            Math.Min(owned, (long)offer.NumberOfItemsToPurchaseFromPlayer - offer.NumberOfItemsPurchasedByPlayer));
++    }
++
 +    private void ReadElectroInventoryTrade(ElectroInventory.Wire.Snapshot snapshot)
 +    {
 +        snapshot.Mode = 2;
@@ -827,6 +915,7 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..4daec5ec022c850a5283b2a5fb5c2ff4
 +                double stock = offer.NumberOfItemsToSellToPlayer < 0 || special ? double.NaN :
 +                    Math.Max(0, offer.NumberOfItemsToSellToPlayer - (desired?.ItemsSoldToPlayer ?? offer.NumberOfItemsSoldToPlayer));
 +                AddElectroInventoryOffer(snapshot, item, 4, special || IsStealing ? double.NaN : offer.PurchasePrice, stock,
++                    ElectroInventoryOffer(item, offer, true),
 +                    special ? "Preço final e disponibilidade no menu original." :
 +                        (IsStealing ? "Contexto de retirada." : "Preço por pacote · " + item.AmountPerPackage + " por pacote"));
 +            }
@@ -838,13 +927,14 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..4daec5ec022c850a5283b2a5fb5c2ff4
 +                double available = special ? double.NaN : limit < 0 ? amount : Math.Min(amount,
 +                    Math.Max(0, limit - (desired?.ItemsPurchasedFromPlayer ?? offer.NumberOfItemsPurchasedByPlayer)));
 +                AddElectroInventoryOffer(snapshot, item, 5, special ? double.NaN : offer.SalesPrice, available,
++                    ElectroInventoryOffer(item, offer, false),
 +                    special ? "Preço final e disponibilidade no menu original." : "Quantidade elegível conforme a sessão.");
 +            }
 +        }
 +    }
 +
 +    private static void AddElectroInventoryOffer(ElectroInventory.Wire.Snapshot snapshot, ModItem item,
-+        byte group, double price, double count, string detail)
++        byte group, double price, double count, LosSantosRED.lsr.InventoryActionBinding binding, string detail)
 +    {
 +        if (snapshot.Rows.Count >= ElectroInventory.Wire.Protocol.MaxRows)
 +        {
@@ -853,7 +943,7 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..4daec5ec022c850a5283b2a5fb5c2ff4
 +        }
 +        snapshot.Rows.Add(new ElectroInventory.Wire.Entry { Id = item.Name, Name = item.DisplayName,
 +            Category = LanguageStrings.Translate("content.item.type." + item.ItemType, item.ItemType.ToString()),
-+            Description = item.DisplayDescription, Group = group, Quantity = count, Price = price, Detail = detail });
++            Description = item.DisplayDescription, Group = group, Quantity = count, Price = price, Detail = detail, TradeBinding = binding });
 +    }
 +
      public void CreateTransactionMenu(ILocationInteractable player, IModItems modItems, IEntityProvideable world, ISettingsProvideable settings, IWeapons weapons, ITimeControllable time)
@@ -863,7 +953,7 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..4daec5ec022c850a5283b2a5fb5c2ff4
          SetupLists();
          if (Store == null)
          {
-@@ -317,6 +386,17 @@ public class Transaction
+@@ -317,6 +449,17 @@ public class Transaction
      }
      public void Update()
      {
@@ -881,7 +971,7 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..4daec5ec022c850a5283b2a5fb5c2ff4
          if (MenuPool.IsAnyMenuOpen())
          {
              if (RotatePreview)
-@@ -339,6 +419,7 @@ public class Transaction
+@@ -339,6 +482,7 @@ public class Transaction
      }
      public void DisposeTransactionMenu()
      {
@@ -944,9 +1034,27 @@ index 8500d27e10a3d2800dc9111c68780c2ab99400e6..72eea3022cf64e01876a1a5d07192b2c
      public override string DebugString => "";
      public override bool CanPerformActivities { get; set; } = false;
 diff --git a/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs b/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs
-index 8a122346098314ed4dfe74e939c420b1fa320aa3..4ef6c961a87341a1ff38c756877934f6b5b1f480 100644
+index 8a122346098314ed4dfe74e939c420b1fa320aa3..7472177a9501291f7a4d5bc7cb65d149bb7d4743 100644
 --- a/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs	
 +++ b/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs	
+@@ -266,7 +266,7 @@ public class ModItem
+         sellScroller.Description = description;
+         //EntryPoint.WriteToConsoleTestLong($"SELL Item: {Name} formattedSalesPrice {formattedPurchasePrice} NumberOfItemsToPurchaseFromPlayer: {menuItem.NumberOfItemsToPurchaseFromPlayer} ItemsBoughtFromPlayer {itemsBoughtFromPlayer}");
+     }
+-    private bool SellItem(Transaction Transaction, ILocationInteractable player, MenuItem menuItem, int TotalItems, bool isStealing)
++    internal bool SellItem(Transaction Transaction, ILocationInteractable player, MenuItem menuItem, int TotalItems, bool isStealing)
+     {
+         int TotalPrice = menuItem.SalesPrice * TotalItems;
+         if (player.Inventory.Remove(this, TotalItems))
+@@ -407,7 +407,7 @@ public class ModItem
+             //EntryPoint.WriteToConsoleTestLong($"PURCHASE Item: {Name} formattedPurchasePrice {formattedPurchasePrice} NumberOfItemsToSellToPlayer: {menuItem.NumberOfItemsToSellToPlayer} ItemsSoldToPlayer {itemsSoldToPlayer}");
+         }
+     }
+-    private bool PurchaseItem(Transaction Transaction, ILocationInteractable player, MenuItem menuItem, int TotalItems, bool isStealing)
++    internal bool PurchaseItem(Transaction Transaction, ILocationInteractable player, MenuItem menuItem, int TotalItems, bool isStealing)
+     {
+         int TotalPrice = menuItem.PurchasePrice * TotalItems;
+         if (player.BankAccounts.GetMoney(Transaction.UseAccounts) >= TotalPrice || isStealing)
 @@ -578,14 +578,7 @@ public class ModItem
          takeScroller = new UIMenuNumericScrollerItem<int>(LanguageStrings.Translate("inventory.take", "Take"), "", 1, 1, 1) { Value = 1, Enabled = true, Formatter = v => v.ToString() + " " + GetDisplayMeasurementName() + (v > 1 ? "(s)" : "") };
          takeScroller.Activated += (sender, selectedItem) =>
