@@ -14,6 +14,7 @@ internal static class Program
     private static void Main()
     {
         CheckOverlayInput();
+        CheckFocusAndClicks();
         CheckActions();
         CheckTrade();
         var snapshot = new Snapshot { Session = Guid.NewGuid(), Character = 41, Title = "Inventário" };
@@ -151,6 +152,45 @@ internal static class Program
             Require(balance == 8 && held == 1 && sold == 1 && bought == 1);
         }
         Console.WriteLine("Comércio: abas, cotação, limites, sequências modeladas e rejeição de repetição passaram.");
+    }
+
+    private static void CheckFocusAndClicks()
+    {
+        var session = Guid.NewGuid();
+        long now = Stopwatch.GetTimestamp();
+        Require(ActionProtocol.CanGrantFocus(true, session, session, now, now));
+        Require(!ActionProtocol.CanGrantFocus(false, session, session, now, now));
+        Require(!ActionProtocol.CanGrantFocus(true, session, Guid.NewGuid(), now, now));
+        Require(!ActionProtocol.CanGrantFocus(true, session, session, now, now + ActionProtocol.FocusLifetime));
+        Require(ActionProtocol.HasFocus(session, session, now + ActionProtocol.FocusLifetime, now));
+        Require(!ActionProtocol.HasFocus(session, Guid.Empty, now + ActionProtocol.FocusLifetime, now));
+
+        var snapshot = new Snapshot { Mode = 2 };
+        snapshot.Rows.Add(new Entry { Group = 4, Price = 3, Id = "buy" });
+        snapshot.Rows.Add(new Entry { Group = 5, Price = 2, Id = "sell" });
+        var tabs = new ElectroInventory.TradeTabs();
+        var targets = new ElectroInventory.HitTargets();
+        var pointer = new ElectroInventory.PointerCapture();
+        int selectedCard = 0, confirmed = 0;
+        targets.Add(new Rectangle(0, 0, 100, 50), () => tabs.Select(snapshot, 4));
+        targets.Add(new Rectangle(100, 0, 100, 50), () => tabs.Select(snapshot, 5));
+        targets.Add(new Rectangle(0, 50, 200, 70), () => selectedCard++);
+        targets.Add(new Rectangle(200, 50, 100, 70), () => confirmed++);
+        foreach (byte mode in new byte[] { 0, 1, 2 })
+        {
+            bool owns = mode == 0 || ActionProtocol.HasFocus(session, session, now + ActionProtocol.FocusLifetime, now);
+            Require(owns);
+            Require(!pointer.Click(false, true) && !pointer.Click(owns, true)); // native press crossed the handoff
+            Require(!pointer.Click(owns, false) && pointer.Click(owns, true) && !pointer.Click(owns, true));
+        }
+        Require(targets.Click(new Point(110, 10)) && tabs.Current == 5);
+        Require(targets.Click(new Point(10, 10)) && tabs.Current == 4);
+        Require(targets.Click(new Point(20, 70)) && selectedCard == 1);
+        Require(targets.Click(new Point(240, 60)) && confirmed == 1);
+        targets.Clear();
+        Require(!targets.Click(new Point(240, 60)) && confirmed == 1);
+        Require(!ActionProtocol.HasFocus(session, session, now, now)); // pool can resume
+        Console.WriteLine("Foco: concessão, cliques, perda da sessão e devolução passaram.");
     }
 
     private static void CheckOverlayInput()

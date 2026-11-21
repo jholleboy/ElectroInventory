@@ -1,9 +1,9 @@
 diff --git a/Los Santos RED/ElectroInventoryActionProtocol.cs b/Los Santos RED/ElectroInventoryActionProtocol.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..fbe3977a403427a26119bc0d952e5453fb836f55
+index 0000000000000000000000000000000000000000..582c7a8c60911b76ac2a952550e4bfffd8a31080
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryActionProtocol.cs	
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,89 @@
 +using System;
 +using System.IO.MemoryMappedFiles;
 +using System.Threading;
@@ -32,6 +32,17 @@ index 0000000000000000000000000000000000000000..fbe3977a403427a26119bc0d952e5453
 +    internal static class ActionProtocol
 +    {
 +        public const int Magic = 0x45494132, Capacity = 65536, Offers = 160, OfferSize = 24;
++        public const int FocusRequest = 49000, FocusGrant = 49024;
++        public static readonly long FocusLifetime = System.Diagnostics.Stopwatch.Frequency * 3 / 4;
++        public static readonly long FocusClientMargin = System.Diagnostics.Stopwatch.Frequency / 10;
++
++        public static bool HasFocus(Guid session, Guid grant, long expires, long now, long margin = 0) =>
++            session != Guid.Empty && session == grant && expires > now && expires - now > margin;
++
++        public static bool CanGrantFocus(bool eligible, Guid session, Guid request, long requested, long now) =>
++            eligible && session != Guid.Empty && session == request && requested > 0
++            && requested <= now && now - requested < FocusLifetime;
++
 +        public static string Channel(int pid) => @"Local\ElectroInventory.Lsr.actions.v2." + pid;
 +
 +        public static bool Authorize(ActionCommand command, Guid session, Guid revision, ActionOffer offer) =>
@@ -84,10 +95,10 @@ index 0000000000000000000000000000000000000000..fbe3977a403427a26119bc0d952e5453
 +}
 diff --git a/Los Santos RED/ElectroInventoryActionServer.cs b/Los Santos RED/ElectroInventoryActionServer.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..edb0b45bd012f307edecae65c1f655a4e3a68b4c
+index 0000000000000000000000000000000000000000..ffa784b9494c1a605c12aa1e1296dc7e3ddc5c4d
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryActionServer.cs	
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,160 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Diagnostics;
@@ -117,7 +128,7 @@ index 0000000000000000000000000000000000000000..edb0b45bd012f307edecae65c1f655a4
 +        private bool disabled, executing;
 +
 +        internal void Update(int pid, long stamp, Snapshot snapshot, byte[] payload,
-+            List<InventoryActionBinding> current)
++            List<InventoryActionBinding> current, bool focusEligible)
 +        {
 +            if (disabled || executing) return;
 +            ActionCommand command = null;
@@ -142,6 +153,15 @@ index 0000000000000000000000000000000000000000..edb0b45bd012f307edecae65c1f655a4
 +                if (!ActionProtocol.TryLock(mutex)) return;
 +                try
 +                {
++                    long now = Stopwatch.GetTimestamp();
++                    long requested = view.ReadInt64(ActionProtocol.FocusRequest + 16);
++                    var focusRequest = ActionProtocol.ReadGuid(view, ActionProtocol.FocusRequest);
++                    bool grant = ActionProtocol.CanGrantFocus(focusEligible, snapshot.Session, focusRequest, requested, now);
++                    var granted = grant ? focusRequest : Guid.Empty;
++                    long until = grant ? requested + ActionProtocol.FocusLifetime : 0;
++                    ElectroInventoryPublisher.SetMenuFocus(granted, until);
++                    ActionProtocol.WriteGuid(view, ActionProtocol.FocusGrant, granted);
++                    view.Write(ActionProtocol.FocusGrant + 16, until);
 +                    if (view.ReadInt32(64) == 1)
 +                    {
 +                        command = new ActionCommand { Id = ActionProtocol.ReadGuid(view, 68),
@@ -228,6 +248,7 @@ index 0000000000000000000000000000000000000000..edb0b45bd012f307edecae65c1f655a4
 +
 +        public void Dispose()
 +        {
++            ElectroInventoryPublisher.SetMenuFocus(Guid.Empty, 0);
 +            if (view != null && mutex != null && ActionProtocol.TryLock(mutex))
 +            {
 +                try { view.Write(8, 0L); view.Write(64, 0); }
@@ -381,10 +402,10 @@ index 0000000000000000000000000000000000000000..840981c46fecb61af1c6df5970601517
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..bbef82676d6820289b248ba41ac962d0c5d7acf3
+index 0000000000000000000000000000000000000000..4c560fbfcd2ffd182a560f6122eef86bd8cae8d5
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
-@@ -0,0 +1,281 @@
+@@ -0,0 +1,299 @@
 +using ElectroInventory.Wire;
 +using Rage;
 +using System;
@@ -398,6 +419,20 @@ index 0000000000000000000000000000000000000000..bbef82676d6820289b248ba41ac962d0
 +    internal sealed class ElectroInventoryPublisher : IDisposable
 +    {
 +        private static object owner;
++        private static RAGENativeUI.MenuPool focusPool;
++        private static Guid mouseSession;
++        private static long mouseExpires;
++
++        internal static bool OwnsMenuInput(RAGENativeUI.MenuPool pool) =>
++            owner != null && ReferenceEquals(pool, focusPool) &&
++            ActionProtocol.HasFocus(contextSession, mouseSession, mouseExpires, Stopwatch.GetTimestamp()) &&
++            Stopwatch.GetTimestamp() - touch <= Stopwatch.Frequency / 2 && valid();
++
++        internal static void SetMenuFocus(Guid session, long expires)
++        {
++            mouseSession = session;
++            mouseExpires = expires;
++        }
 +        private static Func<bool> valid;
 +        private static Action<Snapshot> fill;
 +        private static Guid contextSession;
@@ -455,10 +490,11 @@ index 0000000000000000000000000000000000000000..bbef82676d6820289b248ba41ac962d0
 +            };
 +        }
 +
-+        internal static void Track(object key, Func<bool> isValid, Action<Snapshot> populate)
++        internal static void Track(object key, RAGENativeUI.MenuPool pool, Func<bool> isValid, Action<Snapshot> populate)
 +        {
 +            if (!ReferenceEquals(owner, key)) contextSession = Guid.NewGuid();
 +            owner = key;
++            focusPool = pool;
 +            valid = isValid;
 +            fill = populate;
 +            touch = Stopwatch.GetTimestamp();
@@ -468,6 +504,8 @@ index 0000000000000000000000000000000000000000..bbef82676d6820289b248ba41ac962d0
 +        {
 +            if (!ReferenceEquals(owner, key)) return;
 +            owner = null;
++            focusPool = null;
++            SetMenuFocus(Guid.Empty, 0);
 +            valid = null;
 +            fill = null;
 +        }
@@ -633,7 +671,8 @@ index 0000000000000000000000000000000000000000..bbef82676d6820289b248ba41ac962d0
 +                var bindings = snapshot.Rows.ConvertAll(row => snapshot.Mode == 1
 +                    ? StorageBinding(controller, snapshot, row) : snapshot.Mode == 2
 +                    ? TradeBinding(controller, snapshot, row) : PersonalBinding(controller, snapshot, row));
-+                actions.Update(pid, stamp, snapshot, payload, bindings);
++                actions.Update(pid, stamp, snapshot, payload, bindings,
++                    snapshot.Mode != 0 && focusPool != null && ContextStillValid(controller, snapshot));
 +            }
 +            catch (ThreadAbortException) { throw; }
 +            catch (Exception e)
@@ -798,7 +837,7 @@ index 9c4fed33ae3f2b21b57f1655f1d85a5b2ce55740..7ca80677550575c32e3627c14a9de5df
          if (removeBanner)
          {
 diff --git a/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs b/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs
-index 802261ec553df5c8c7d38d3efdde0927d4d964b2..a62847bd762e2b378341ef9a30d912239f9a6bb6 100644
+index 802261ec553df5c8c7d38d3efdde0927d4d964b2..e48d323f41ef202c262f687f1a05c02476dda87f 100644
 --- a/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs	
 +++ b/Los Santos RED/lsr/Locations/Places/GameLocations/Business.cs	
 @@ -443,11 +443,17 @@ public class Business : GameLocation, ILocationSetupable, IRestableLocation, IIn
@@ -811,7 +850,7 @@ index 802261ec553df5c8c7d38d3efdde0927d4d964b2..a62847bd762e2b378341ef9a30d91223
 +        System.Func<bool> storageVisible = () => Player.IsAliveAndFree && IsAnyMenuVisible && IsOwned;
          while (IsAnyMenuVisible || Time.IsFastForwarding)
          {
-+            LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, storageVisible, readStorage);
++            LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, MenuPool, storageVisible, readStorage);
              global::UI.ProcessLocalizedMenus(MenuPool);
              GameFiber.Yield();
          }
@@ -820,7 +859,7 @@ index 802261ec553df5c8c7d38d3efdde0927d4d964b2..a62847bd762e2b378341ef9a30d91223
          Player.ActivityManager.IsInteractingWithLocation = false;
          Player.IsTransacting = false;
 diff --git a/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs b/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs
-index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..e1f92cfae0085dc65c4a76d6ae75ed47d9421786 100644
+index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..575a7b8611ebfada052780a9c501701ce9f87003 100644
 --- a/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs	
 +++ b/Los Santos RED/lsr/Locations/Places/GameLocations/Residence/Residence.cs	
 @@ -262,11 +262,17 @@ public class Residence : GameLocation, ILocationSetupable, IRestableLocation, II
@@ -833,7 +872,7 @@ index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..e1f92cfae0085dc65c4a76d6ae75ed47
 +        System.Func<bool> storageVisible = () => Player.IsAliveAndFree && IsAnyMenuVisible && IsOwnedOrRented;
          while (IsAnyMenuVisible || Time.IsFastForwarding || KeepInteractionGoing)
          {
-+            LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, storageVisible, readStorage);
++            LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, MenuPool, storageVisible, readStorage);
              global::UI.ProcessLocalizedMenus(MenuPool);
              GameFiber.Yield();
          }
@@ -842,7 +881,7 @@ index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..e1f92cfae0085dc65c4a76d6ae75ed47
          Player.ActivityManager.IsInteractingWithLocation = false;
          Player.IsTransacting = false;
 diff --git a/Los Santos RED/lsr/Locations/Places/Transaction.cs b/Los Santos RED/lsr/Locations/Places/Transaction.cs
-index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..454125fa08834c8e81e2e281ea43b0c2b2f2f3e8 100644
+index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..c86957281f655815707e2a8a32616ad0fbac0942 100644
 --- a/Los Santos RED/lsr/Locations/Places/Transaction.cs	
 +++ b/Los Santos RED/lsr/Locations/Places/Transaction.cs	
 @@ -63,8 +63,141 @@ public class Transaction
@@ -999,7 +1038,7 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..454125fa08834c8e81e2e281ea43b0c2
 +            Game.LogTrivial("[ElectroInventory RC2] Comércio " + (Store?.GetType().Name ?? "NPC") + ": " + diagnostic + ".");
 +        }
 +        if (readState == null)
-+            LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, IsElectroInventoryTradeVisible, ReadElectroInventoryTrade);
++            LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, MenuPool, IsElectroInventoryTradeVisible, ReadElectroInventoryTrade);
 +        else
 +            LosSantosRED.lsr.ElectroInventoryPublisher.Clear(this);
          if (MenuPool.IsAnyMenuOpen())
@@ -1225,8 +1264,22 @@ index 38c1c13bc4e583b9c4bdbdf34e4231f6d6fbd0dd..6ed5926a8d5c19241fbf558bdbc1f501
          NativeFunction.Natives.SET_EVERYONE_IGNORE_PLAYER(Game.LocalPlayer, false);
          Game.LocalPlayer.Character.IsVisible = true;
          NativeFunction.Natives.CLEAR_FOCUS();
+diff --git a/Los Santos RED/lsr/UI/UI.cs b/Los Santos RED/lsr/UI/UI.cs
+index fa36d917e271d44a43f0fa677118954a523340d3..84dc39cb0da2d8ee47413c56cd7be8984bd8dd78 100644
+--- a/Los Santos RED/lsr/UI/UI.cs	
++++ b/Los Santos RED/lsr/UI/UI.cs	
+@@ -146,6 +146,9 @@ public class UI : IMenuProvideable
+     }
+     internal static void ProcessLocalizedMenus(MenuPool pool)
+     {
++        // Keep native menu state and its owning interaction alive, but leave its input to the overlay.
++        if (LosSantosRED.lsr.ElectroInventoryPublisher.OwnsMenuInput(pool))
++            return;
+         foreach (var menu in pool)
+         {
+             if (menu.Visible && menu.InstructionalButtonsEnabled)
 diff --git a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs b/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs
-index 54b02a3921fdb496fc53e4af41312ac6a784d07e..40d598c45ec62c47e38268f86bf07c824bba0411 100644
+index 54b02a3921fdb496fc53e4af41312ac6a784d07e..9f39850ab3e9257a1657d6248e469ac7d35390b8 100644
 --- a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs	
 +++ b/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs	
 @@ -17,6 +17,9 @@ public class VehicleInteractionMenu
@@ -1288,7 +1341,7 @@ index 54b02a3921fdb496fc53e4af41312ac6a784d07e..40d598c45ec62c47e38268f86bf07c82
                  while (EntryPoint.ModController.IsRunning && Player.IsAliveAndFree && MenuPool.IsAnyMenuOpen() && VehicleExt.Vehicle.Exists() && VehicleExt.Vehicle.Speed <= 0.5f && VehicleExt.Vehicle.DistanceTo2D(Game.LocalPlayer.Character) <= 7f)
                  {
 +                    if (IsElectroInventoryStorageVisible())
-+                        LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, IsElectroInventoryStorageVisible, ReadElectroInventoryStorage);
++                        LosSantosRED.lsr.ElectroInventoryPublisher.Track(this, MenuPool, IsElectroInventoryStorageVisible, ReadElectroInventoryStorage);
 +                    else
 +                        LosSantosRED.lsr.ElectroInventoryPublisher.Clear(this);
                      global::UI.ProcessLocalizedMenus(MenuPool);

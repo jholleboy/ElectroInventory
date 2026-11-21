@@ -26,6 +26,17 @@ namespace ElectroInventory.Wire
     internal static class ActionProtocol
     {
         public const int Magic = 0x45494132, Capacity = 65536, Offers = 160, OfferSize = 24;
+        public const int FocusRequest = 49000, FocusGrant = 49024;
+        public static readonly long FocusLifetime = System.Diagnostics.Stopwatch.Frequency * 3 / 4;
+        public static readonly long FocusClientMargin = System.Diagnostics.Stopwatch.Frequency / 10;
+
+        public static bool HasFocus(Guid session, Guid grant, long expires, long now, long margin = 0) =>
+            session != Guid.Empty && session == grant && expires > now && expires - now > margin;
+
+        public static bool CanGrantFocus(bool eligible, Guid session, Guid request, long requested, long now) =>
+            eligible && session != Guid.Empty && session == request && requested > 0
+            && requested <= now && now - requested < FocusLifetime;
+
         public static string Channel(int pid) => @"Local\ElectroInventory.Lsr.actions.v2." + pid;
 
         public static bool Authorize(ActionCommand command, Guid session, Guid revision, ActionOffer offer) =>

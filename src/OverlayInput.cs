@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Collections.Generic;
 
 namespace ElectroInventory
 {
@@ -12,6 +13,33 @@ namespace ElectroInventory
             bool suppress = ownsInput || captured;
             captured = escapeDown && suppress;
             return suppress;
+        }
+    }
+
+    internal sealed class PointerCapture
+    {
+        private bool armed;
+        public bool Click(bool ownsInput, bool down)
+        {
+            if (!ownsInput) { armed = false; return false; }
+            if (!down) { armed = true; return false; }
+            if (!armed) return false;
+            armed = false;
+            return true;
+        }
+    }
+
+    internal sealed class HitTargets
+    {
+        private readonly List<Tuple<Rectangle, Action>> targets = new List<Tuple<Rectangle, Action>>();
+        public void Clear() => targets.Clear();
+        public void Add(Rectangle region, Action action) => targets.Add(Tuple.Create(region, action));
+        public bool Click(Point point)
+        {
+            var hit = targets.FindLast(target => target.Item1.Contains(point));
+            if (hit == null) return false;
+            hit.Item2();
+            return true;
         }
     }
 

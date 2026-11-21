@@ -24,7 +24,7 @@ namespace ElectroInventory
         private static readonly Color Ink = Color.FromArgb(231, 245, 250), Muted = Color.FromArgb(157, 177, 194);
         private static readonly Color CardSelected = Color.FromArgb(23, 54, 68);
         private static readonly Color Card = Color.FromArgb(19, 36, 53), Edge = Color.FromArgb(49, 76, 94);
-        public readonly List<Tuple<Rectangle, Action>> Targets = new List<Tuple<Rectangle, Action>>();
+        public readonly HitTargets Targets = new HitTargets();
 
         public static List<Entry> Items(Snapshot snapshot, Navigation nav, bool right)
         {
@@ -36,7 +36,7 @@ namespace ElectroInventory
                     System.Globalization.CompareOptions.IgnoreNonSpace) >= 0).ToList();
         }
 
-        public Bitmap Make(Snapshot snapshot, Navigation nav, bool demo, bool passive, ActionSelection action, ActionResult result, bool busy)
+        public Bitmap Make(Snapshot snapshot, Navigation nav, bool demo, bool ownsInput, ActionSelection action, ActionResult result, bool busy)
         {
             var image = new Bitmap(Width, Height);
             using (var g = Graphics.FromImage(image))
@@ -44,6 +44,7 @@ namespace ElectroInventory
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 Targets.Clear();
+                bool passive = !ownsInput;
                 Box(g, new Rectangle(0, 0, Width, Height), Color.FromArgb(9, 19, 31), Cyan);
                 Line(g, 25, 72, Width - 25, 72, Edge);
                 Text(g, "◇  ELECTROINVENTORY", 29, 20, 480, 33, 21, Cyan, true);
@@ -57,10 +58,10 @@ namespace ElectroInventory
                     Button(g, new Rectangle(914, 99, 456, 46),
                         (nav.Search ? "⌕  › " : "⌕  ") + (nav.Query.Length == 0 ? "Pesquisar por nome" : nav.Query),
                         () => nav.Search = true, nav.Search);
-                else if (!double.IsNaN(snapshot.Balance))
-                    Text(g, "Saldo aplicável  $ " + Quantity(snapshot.Balance), 1004, 107, 355, 30, 19, Cyan, true);
+                if (!double.IsNaN(snapshot.Balance))
+                    Text(g, "Saldo aplicável  $ " + Quantity(snapshot.Balance), 1004, 149, 355, 30, 19, Cyan, true);
 
-                if (snapshot.Mode == 2) DrawTradeTabs(g, snapshot, nav);
+                if (snapshot.Mode == 2) DrawTradeTabs(g, snapshot, nav, ownsInput);
                 var categories = snapshot.Rows.Select(x => x.Category).Where(x => !string.IsNullOrWhiteSpace(x))
                     .Distinct().ToList();
                 categories.Insert(0, "");
@@ -68,7 +69,7 @@ namespace ElectroInventory
                 int count = active.Count;
                 nav.Selected = Math.Max(0, Math.Min(nav.Selected, count - 1));
                 nav.Offset = (nav.Selected / Page) * Page;
-                if (!passive)
+                if (ownsInput && snapshot.Mode != 2)
                 {
                     int x = 28;
                     foreach (string category in categories.Skip(nav.CategoryOffset).Take(8))
@@ -91,10 +92,10 @@ namespace ElectroInventory
                 else Grid(g, active, nav, false, new Rectangle(26, 230, 912, 458),
                     snapshot.Mode == 2 ? (nav.Trade.Current == TradeTabs.Buy ? "Ofertas da sessão" : "Itens elegíveis do inventário") : "Itens pessoais", 3, passive);
                 DrawDetail(g, count == 0 ? null : active[nav.Selected]);
-                DrawActions(g, action, result, busy, passive);
+                DrawActions(g, action, result, busy, passive, snapshot.Mode == 2);
                 Line(g, 25, 704, Width - 25, 704, Edge);
                 Text(g, snapshot.Mode == 2
-                    ? "F10 fecha  ·  Ctrl+F2 Comprar/Vender  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela"
+                    ? "F10 fecha  ·  Clique ou Ctrl+F2 Comprar/Vender  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela"
                     : passive ? "F10 fecha  ·  Ctrl+F6 troca lado  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F4 ação  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela" :
                     "Setas/mouse  Navegar  ·  PgUp/PgDn/roda  Página  ·  /  Pesquisar  ·  Ctrl+F4  Ação  ·  Ctrl+F3  Confirmar  ·  I/Esc  Fechar",
                     28, 718, 1150, 27, 16, Muted, false);
@@ -103,7 +104,7 @@ namespace ElectroInventory
             return image;
         }
 
-        private static void DrawTradeTabs(Graphics g, Snapshot snapshot, Navigation nav)
+        private void DrawTradeTabs(Graphics g, Snapshot snapshot, Navigation nav, bool ownsInput)
         {
             foreach (byte group in new[] { TradeTabs.Buy, TradeTabs.Sell })
             {
@@ -114,6 +115,8 @@ namespace ElectroInventory
                 Box(g, rect, Card, selected ? Cyan : Edge);
                 Text(g, group == TradeTabs.Buy ? "COMPRAR" : "VENDER", x + 12, 188, 130, 24, 16,
                     present && selected ? Cyan : Muted, true);
+                if (present && ownsInput)
+                    Targets.Add(rect, () => { if (nav.Trade.Select(snapshot, group)) nav.Filter(""); });
             }
             string reason = !TradeTabs.HasRows(snapshot, TradeTabs.Buy) ? "Compra: sem ofertas deste comerciante." :
                 !TradeTabs.HasRows(snapshot, TradeTabs.Sell) ? "Venda: nenhum item elegível ou comerciante não compra." : "";
@@ -121,7 +124,7 @@ namespace ElectroInventory
         }
 
         public bool CloseRequested, ActionRequested;
-        public void Click(Point point) { Targets.FindLast(hit => hit.Item1.Contains(point))?.Item2(); }
+        public void Click(Point point) { Targets.Click(point); }
 
         private void Grid(Graphics g, List<Entry> rows, Navigation nav, bool right, Rectangle bounds, string title, int columns, bool passive)
         {
@@ -141,7 +144,7 @@ namespace ElectroInventory
                 Text(g, Glyph(row), card.X + 7, card.Y + 7, 34, 25, 20, selected ? Pink : Cyan, true);
                 Text(g, row.Name, card.X + 7, card.Y + 35, card.Width - 14, 27, 16, Ink, true);
                 Text(g, Summary(row), card.X + 7, card.Bottom - 22, card.Width - 14, 20, 14, selected ? Ink : Muted, false);
-                if (!passive) Targets.Add(Tuple.Create(card, (Action)(() => { nav.Right = right; nav.Selected = index; nav.Search = false; })));
+                if (!passive) Targets.Add(card, () => { nav.Right = right; nav.Selected = index; nav.Search = false; });
             }
             Text(g, rows.Count == 0 ? "0 entradas" : $"{offset + 1}–{Math.Min(rows.Count, offset + Page)} / {rows.Count}",
                 bounds.X + 12, bounds.Bottom - 32, bounds.Width - 24, 23, 15, Muted, false);
@@ -159,7 +162,7 @@ namespace ElectroInventory
             Text(g, row.Detail, 971, 510, 370, 48, 16, Muted, false);
         }
 
-        private void DrawActions(Graphics g, ActionSelection action, ActionResult result, bool busy, bool passive)
+        private void DrawActions(Graphics g, ActionSelection action, ActionResult result, bool busy, bool passive, bool trade)
         {
             string status = busy ? "Aguardando o LS RED…" : result == ActionResult.Started ? "Atividade iniciada no LS RED." :
                 result == ActionResult.Success ? "Operação concluída." : result == ActionResult.Expired ? "Contexto alterado. Selecione novamente." :
@@ -168,7 +171,7 @@ namespace ElectroInventory
             Text(g, status, 970, 655, 380, 26, 15, Muted, false);
             if (action.Kind == ActionKind.None || busy)
             {
-                if (!busy) Text(g, "Ação indisponível para esta seleção na sessão atual.", 970, 603, 380, 42, 16, Muted, false);
+                if (!busy) Text(g, trade ? "Preço informativo. Ação indisponível neste contexto." : "Ação indisponível nesta seleção.", 970, 603, 380, 42, 16, Muted, false);
                 return;
             }
             string label = ActionSelection.Label(action.Kind);
@@ -218,7 +221,7 @@ namespace ElectroInventory
         {
             Box(g, rectangle, Card, active ? Cyan : Edge);
             Text(g, label, rectangle.X + 8, rectangle.Y + 3, rectangle.Width - 12, rectangle.Height - 6, 16, Ink, false);
-            Targets.Add(Tuple.Create(rectangle, action));
+            Targets.Add(rectangle, action);
         }
         private static void Line(Graphics g, int x, int y, int x2, int y2, Color color)
         { using (var pen = new Pen(color)) g.DrawLine(pen, x, y, x2, y2); }

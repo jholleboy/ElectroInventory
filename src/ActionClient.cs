@@ -83,6 +83,22 @@ namespace ElectroInventory
             }
         }
 
+        // The RC2 grants only the MenuPool associated with this exact live session.
+        public bool UpdateFocus(Guid session)
+        {
+            if (view == null || !ActionProtocol.TryLock(mutex)) return false;
+            try
+            {
+                long now = Stopwatch.GetTimestamp();
+                ActionProtocol.WriteGuid(view, ActionProtocol.FocusRequest, session);
+                view.Write(ActionProtocol.FocusRequest + 16, session == Guid.Empty ? 0L : now);
+                return ActionProtocol.HasFocus(session, ActionProtocol.ReadGuid(view, ActionProtocol.FocusGrant),
+                    view.ReadInt64(ActionProtocol.FocusGrant + 16), now, ActionProtocol.FocusClientMargin);
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { return false; }
+            finally { mutex.ReleaseMutex(); }
+        }
+
         public bool Submit(Guid session, Guid revision, ActionOffer offer, ActionKind kind, int quantity)
         {
             if (view == null || Busy || revision != Revision || offer == null) return false;
@@ -116,6 +132,7 @@ namespace ElectroInventory
 
         public void Dispose()
         {
+            if (view != null) UpdateFocus(Guid.Empty);
             view?.Dispose(); map?.Dispose(); mutex?.Dispose();
             view = null; map = null; mutex = null;
             Revision = pending = Guid.Empty;

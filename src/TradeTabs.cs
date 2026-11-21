@@ -15,7 +15,12 @@ namespace ElectroInventory
         public bool Toggle(Snapshot snapshot)
         {
             byte next = Current == Buy ? Sell : Buy;
-            if (!HasRows(snapshot, next)) return false;
+            return Select(snapshot, next);
+        }
+
+        public bool Select(Snapshot snapshot, byte next)
+        {
+            if ((next != Buy && next != Sell) || Current == next || !HasRows(snapshot, next)) return false;
             Current = next;
             return true;
         }

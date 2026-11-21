@@ -51,3 +51,9 @@ Rodada final em save de teste:
 O console testa alternância entre abas com duas ou apenas uma direção, seleção identificada após atualização, preço alterado, saldo, estoque, item rejeitado, sessão inválida e revisão aposentada. As sequências compra/venda e venda/compra são modeladas com os contadores consumidos pelas regras de cotação. A execução dos menus reais continua pendente.
 
 No teste integrado, abra F10 num comerciante comum que compre e venda. Use Ctrl+F2 mantendo a câmera e o menu nativo ativos. Compre um item elegível e confirme seu aparecimento em Vender; inverta a ordem e compare os contadores, saldos e pilhas com a RC2. Tente duplo acionamento, mudança de preço, última unidade, fechamento da sessão e comerciante indisponível. Repita em loja de direção única e em NPC com executor não habilitado.
+
+### Mouse e devolução de foco
+
+O console testa concessão por sessão, rejeição quando o contexto não é elegível, expiração, borda de clique e despacho de alvos para cartão, abas e confirmação. A suíte também cobre o mapeamento do cursor e Escape. Esses testes exercitam a lógica comum; o processamento do RAGENativeUI e o desenho do cursor devem ser verificados no GTA V.
+
+No teste integrado, abra F10 em The Families Den e no armazenamento de um veículo ou imóvel. Clique em ambas as abas, em cartões e, onde houver oferta autorizada, em quantidade e confirmação/cancelamento. Confira que o menu nativo não recebe seleção ou ativação durante os cliques. Feche com F10 ou Esc, repita mantendo o clique pressionado e verifique a devolução do controle. Repita sem a ponte atualizada para confirmar o fallback passivo e com ElectroHud V6 ativo.

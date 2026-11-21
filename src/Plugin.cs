@@ -76,11 +76,14 @@ namespace ElectroInventory
             Guid lastRevision = Guid.Empty;
             var edges = new HashSet<Keys>();
             var pauseGuard = new PauseGuard();
+            var pointer = new PointerCapture();
+            bool ownsInput = false;
+            Guid releaseSession = Guid.Empty;
             LoadCursor();
             Keys toggle = Parse(config.ToggleKey, Keys.I);
             Keys inspect = Parse(config.InspectKey, Keys.F10);
             if (inspect == toggle) log("Inspeção desativada: InspectKey e ToggleKey são iguais.");
-            bool open = false, passive = false, mousePressed = false, conflictLogged = false;
+            bool open = false, passive = false, conflictLogged = false;
             Snapshot sample = null;
             Guid session = Guid.Empty;
             long nextRead = 0;
@@ -90,7 +93,7 @@ namespace ElectroInventory
             while (!stop)
             {
                 bool escapeDown = Game.IsKeyDownRightNow(Keys.Escape);
-                if (pauseGuard.Update(open && !passive, escapeDown))
+                if (pauseGuard.Update(open && ownsInput, escapeDown))
                     BlockPause();
                 long now = Stopwatch.GetTimestamp();
                 bool refresh = now >= nextRead;
@@ -128,14 +131,14 @@ namespace ElectroInventory
                     open = false;
                     ReleaseTexture();
                 }
-                if (open && !passive && escape && selection.Confirming)
+                if (open && ownsInput && escape && selection.Confirming)
                 {
                     selection.Confirming = false;
                     escape = false;
                     refresh = true;
                 }
-                if (open && ((passive && inspectPressed) || (!passive && (layout.CloseRequested ||
-                    (escape && !nav.Search) || (togglePressed && !nav.Search)))))
+                if (open && ((passive && inspectPressed) || (ownsInput && (layout.CloseRequested || (escape && !nav.Search)))
+                    || (!passive && togglePressed && !nav.Search)))
                 {
                     open = false;
                     ReleaseTexture();
@@ -169,29 +172,57 @@ namespace ElectroInventory
                 }
                 else if (open) conflictLogged = false;
 
+                bool previousInput = ownsInput;
+                if (!open && previousInput && passive && sample?.Session == session)
+                    releaseSession = session;
+                if (!open && releaseSession != Guid.Empty && sample?.Session == releaseSession && !blocked)
+                {
+                    // Keep the original pool paused through the release of an overlay click.
+                    BlockMouseClick();
+                    if (NativeFunction.Natives.IS_DISABLED_CONTROL_PRESSED<bool>(0, 237))
+                        actions?.UpdateFocus(releaseSession);
+                    else releaseSession = Guid.Empty;
+                }
+                else releaseSession = Guid.Empty;
+
+                ownsInput = open && (!passive || actions?.UpdateFocus(session) == true);
+                if ((!open && releaseSession == Guid.Empty) || (open && !passive))
+                    actions?.UpdateFocus(Guid.Empty);
+                if (!ownsInput)
+                {
+                    pointer.Click(false, false);
+                    lock (RenderLock) cursorPosition = null;
+                }
+                if (ownsInput != previousInput)
+                {
+                    refresh = true;
+                    // Discard hit targets rendered under the previous ownership state.
+                    layout.Targets.Clear();
+                }
                 if (open)
                 {
                     Size size = Game.Resolution;
                     RectangleF bounds = Fit(size);
-                    if (!passive)
+                    if (ownsInput)
                     {
                         if (nav.Search || !Game.IsKeyDownRightNow(Keys.LControlKey))
                             refresh |= Navigate(nav, edges, toggle, togglePressed, escape);
                         // Frame-local controls expire automatically when the overlay closes.
                         foreach (int control in OverlayControls)
                             NativeFunction.Natives.DISABLE_CONTROL_ACTION(0, control, true);
+                        BlockMouseClick();
                         NativeFunction.Natives.SET_MOUSE_CURSOR_THIS_FRAME();
                         bool click = NativeFunction.Natives.IS_DISABLED_CONTROL_PRESSED<bool>(0, 237);
                         float x = NativeFunction.Natives.GET_CONTROL_NORMAL<float>(0, 239) * size.Width;
                         float y = NativeFunction.Natives.GET_CONTROL_NORMAL<float>(0, 240) * size.Height;
                         bool overPanel = OverlayPointer.TryMap(x, y, bounds, new Size(InventoryView.Width, InventoryView.Height), out Point logical);
                         lock (RenderLock) cursorPosition = overPanel ? new PointF(x, y) : (PointF?)null;
-                        if (click && !mousePressed && overPanel && size == lastSize)
+                        if (pointer.Click(true, click) && overPanel && size == lastSize)
                         {
                             layout.Click(logical);
                             refresh = true;
                         }
-                        mousePressed = click;
+
                     }
                     else if (Game.IsKeyDownRightNow(Keys.LControlKey))
                     {
@@ -215,7 +246,11 @@ namespace ElectroInventory
                     if (sample.Mode == 2 && (row < 0 || !TradeTabs.CanAct(sample.Rows[row], offer))) offer = null;
                     var token = selection.Offer?.Token;
                     selection.Bind(lastRevision, offer);
-                    refresh |= token != selection.Offer?.Token;
+                    if (token != selection.Offer?.Token)
+                    {
+                        layout.ActionRequested = false;
+                        refresh = true;
+                    }
                     if (!nav.Search && Game.IsKeyDownRightNow(Keys.LControlKey))
                     {
                         if (Pressed(Keys.Up, edges)) { nav.Selected = Math.Max(0, nav.Selected - 1); refresh = true; }
@@ -247,7 +282,7 @@ namespace ElectroInventory
                     if (size != lastSize || refresh)
                     {
                         string path = Path.Combine(temp, "page-" + revision++ + ".png");
-                        using (var bitmap = layout.Make(sample, nav, demo, passive, selection, actions?.Result ?? ActionResult.None, actions?.Busy == true)) bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                        using (var bitmap = layout.Make(sample, nav, demo, ownsInput, selection, actions?.Result ?? ActionResult.None, actions?.Busy == true)) bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
                         var next = Game.CreateTextureFromFile(path);
                         if (next == null) throw new IOException("Textura da interface indisponível.");
                         try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
@@ -260,7 +295,6 @@ namespace ElectroInventory
                         lastSize = size;
                     }
                 }
-                else mousePressed = false;
                 GameFiber.Yield();
             }
         }
@@ -311,6 +345,14 @@ namespace ElectroInventory
             float scale = Math.Min(size.Width * .90f / InventoryView.Width, size.Height * .86f / InventoryView.Height);
             float w = InventoryView.Width * scale, h = InventoryView.Height * scale;
             return new RectangleF((size.Width - w) / 2, (size.Height - h) / 2, w, h);
+        }
+
+        private static void BlockMouseClick()
+        {
+            NativeFunction.Natives.DISABLE_CONTROL_ACTION(0, 237, true);
+            NativeFunction.Natives.DISABLE_CONTROL_ACTION(2, 237, true);
+            NativeFunction.Natives.DISABLE_CONTROL_ACTION(0, 238, true);
+            NativeFunction.Natives.DISABLE_CONTROL_ACTION(2, 238, true);
         }
 
         private static void BlockPause()
