@@ -84,6 +84,7 @@ namespace ElectroInventory
                         cached = Protocol.Decode(bytes);
                     previousPayload = bytes;
                     stamp = next;
+                    cached.PublicationStamp = next;
                     if (reportedSession != cached.Session || reportedCount != cached.Rows.Count)
                     {
                         reportedSession = cached.Session;

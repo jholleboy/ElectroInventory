@@ -17,6 +17,7 @@ namespace ElectroInventory.Wire
     internal sealed class Snapshot
     {
         public Guid Session;
+        public long PublicationStamp;
         public int Character;
         public byte Mode; // 0 inventory, 1 storage, 2 trade
         public bool BlocksInput, Incomplete;
