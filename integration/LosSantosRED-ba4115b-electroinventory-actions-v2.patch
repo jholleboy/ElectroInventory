@@ -261,10 +261,10 @@ index 0000000000000000000000000000000000000000..ffa784b9494c1a605c12aa1e1296dc7e
 +}
 diff --git a/Los Santos RED/ElectroInventoryProtocol.cs b/Los Santos RED/ElectroInventoryProtocol.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..840981c46fecb61af1c6df5970601517347c6135
+index 0000000000000000000000000000000000000000..d5db8ff9ac0c0faed48803708c1cb4bf7b1cea00
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryProtocol.cs	
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,136 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Diagnostics;
@@ -287,6 +287,7 @@ index 0000000000000000000000000000000000000000..840981c46fecb61af1c6df5970601517
 +        public Guid Session;
 +        public long PublicationStamp;
 +        internal object StorageContext;
++        internal bool NativeTradeOnly;
 +        public int Character;
 +        public byte Mode; // 0 inventory, 1 storage, 2 trade
 +        public bool BlocksInput, Incomplete;
@@ -402,7 +403,7 @@ index 0000000000000000000000000000000000000000..840981c46fecb61af1c6df5970601517
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..733e1fb5a74a3b861fd05e053a40b6f42abe6e36
+index 0000000000000000000000000000000000000000..628783085fc5f26a4ed87757cb034d3195aef8f4
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
 @@ -0,0 +1,302 @@
@@ -675,7 +676,7 @@ index 0000000000000000000000000000000000000000..733e1fb5a74a3b861fd05e053a40b6f4
 +                    ? StorageBinding(controller, snapshot, row) : snapshot.Mode == 2
 +                    ? TradeBinding(controller, snapshot, row) : PersonalBinding(controller, snapshot, row));
 +                actions.Update(pid, stamp, snapshot, payload, bindings,
-+                    snapshot.Mode != 0 && focusPool != null && ContextStillValid(controller, snapshot));
++                    snapshot.Mode != 0 && !snapshot.NativeTradeOnly && focusPool != null && ContextStillValid(controller, snapshot));
 +            }
 +            catch (ThreadAbortException) { throw; }
 +            catch (Exception e)
@@ -938,10 +939,10 @@ index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..575a7b8611ebfada052780a9c501701c
          Player.ActivityManager.IsInteractingWithLocation = false;
          Player.IsTransacting = false;
 diff --git a/Los Santos RED/lsr/Locations/Places/Transaction.cs b/Los Santos RED/lsr/Locations/Places/Transaction.cs
-index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..c86957281f655815707e2a8a32616ad0fbac0942 100644
+index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..31b058210fa74e265ca6ac687e83cf9f9b2ae274 100644
 --- a/Los Santos RED/lsr/Locations/Places/Transaction.cs	
 +++ b/Los Santos RED/lsr/Locations/Places/Transaction.cs	
-@@ -63,8 +63,141 @@ public class Transaction
+@@ -63,8 +63,146 @@ public class Transaction
      {
  
      }
@@ -1029,9 +1030,12 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..c86957281f655815707e2a8a32616ad0
 +    private void ReadElectroInventoryTrade(ElectroInventory.Wire.Snapshot snapshot)
 +    {
 +        snapshot.Mode = 2;
++        snapshot.NativeTradeOnly = PersonTransaction != null;
 +        string context = PersonTransaction != null ? "Comerciante" : Store is GunStore ? "Armas"
 +            : Store is Dealership ? "Veículos" : "Estabelecimento";
 +        snapshot.Title = context + " | " + (Store?.Name ?? StoreName);
++        if (snapshot.NativeTradeOnly)
++            snapshot.Title += " · Consulta. F10 volta ao menu original";
 +        snapshot.Balance = electroInventoryPlayer.BankAccounts.GetMoney(UseAccounts);
 +        foreach (var offer in ShopMenu.Items)
 +        {
@@ -1073,7 +1077,9 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..c86957281f655815707e2a8a32616ad0
 +        }
 +        snapshot.Rows.Add(new ElectroInventory.Wire.Entry { Id = item.Name, Name = item.DisplayName,
 +            Category = LanguageStrings.Translate("content.item.type." + item.ItemType, item.ItemType.ToString()),
-+            Description = item.DisplayDescription, Group = group, Quantity = count, Price = price, Detail = detail, TradeBinding = binding });
++            Description = item.DisplayDescription, Group = group, Quantity = count, Price = price,
++            Detail = snapshot.NativeTradeOnly ? detail + " · Execute no menu original (F10)." : detail,
++            TradeBinding = binding });
 +    }
 +
      public void CreateTransactionMenu(ILocationInteractable player, IModItems modItems, IEntityProvideable world, ISettingsProvideable settings, IWeapons weapons, ITimeControllable time)
@@ -1083,7 +1089,7 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..c86957281f655815707e2a8a32616ad0
          SetupLists();
          if (Store == null)
          {
-@@ -317,6 +450,17 @@ public class Transaction
+@@ -317,6 +455,17 @@ public class Transaction
      }
      public void Update()
      {
@@ -1101,7 +1107,7 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..c86957281f655815707e2a8a32616ad0
          if (MenuPool.IsAnyMenuOpen())
          {
              if (RotatePreview)
-@@ -339,6 +483,7 @@ public class Transaction
+@@ -339,6 +488,7 @@ public class Transaction
      }
      public void DisposeTransactionMenu()
      {
