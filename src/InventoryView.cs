@@ -9,12 +9,12 @@ namespace ElectroInventory
     internal sealed class Navigation
     {
         public string Query = "", Category = "";
-        public bool Search;
+        public bool Search, Equipment;
         public int Selected, Offset, CategoryOffset;
         private int otherSelected;
         public bool Right;
         public readonly TradeTabs Trade = new TradeTabs();
-        public void Reset() { Query = Category = ""; Search = Right = false; Selected = Offset = CategoryOffset = otherSelected = 0; }
+        public void Reset() { Query = Category = ""; Search = Right = Equipment = false; Selected = Offset = CategoryOffset = otherSelected = 0; }
         public void Filter(string category) { Category = category; Selected = Offset = otherSelected = 0; }
         public int Selection(bool right) => right == Right ? Selected : otherSelected;
         public void Select(bool right, int index)
@@ -26,6 +26,14 @@ namespace ElectroInventory
             }
             Selected = index;
             Search = false;
+        }
+        public void ToggleEquipment()
+        {
+            Equipment = !Equipment;
+            Query = "";
+            Search = false;
+            Select(false, 0);
+            Filter("");
         }
         public void SwitchSide() => Select(!Right, otherSelected);
     }
@@ -59,7 +67,7 @@ namespace ElectroInventory
             return categories;
         }
 
-        public Bitmap Make(Snapshot snapshot, Navigation nav, bool demo, bool ownsInput, ActionSelection action, ActionResult result, bool busy)
+        public Bitmap Make(Snapshot snapshot, Navigation nav, bool demo, bool ownsInput, ActionSelection action, ActionResult result, bool busy, bool gearAvailable)
         {
             var image = new Bitmap(Width, Height);
             using (var g = Graphics.FromImage(image))
@@ -74,7 +82,10 @@ namespace ElectroInventory
                 Text(g, demo ? "DADOS DEMONSTRATIVOS" : "RC2  /  " + (action.Offer == null ? "LEITURA" : "AÇÕES AUTORIZADAS"),  750, 25, 292, 32, 16, Pink, true);
                 if (!passive)
                     Button(g, new Rectangle(1250, 20, 120, 38), "Esc  Fechar", () => CloseRequested = true);
-                Text(g, snapshot.Mode == 1 ? "ARMAZENAMENTO" : snapshot.Mode == 2 ? "COMÉRCIO" : "INVENTÁRIO",
+                if (gearAvailable && ownsInput)
+                    Button(g, new Rectangle(520, 19, 203, 40), nav.Equipment ? "F1  Voltar aos itens" : "F1  Equipamentos",
+                        nav.ToggleEquipment, nav.Equipment);
+                Text(g, nav.Equipment ? "EQUIPAMENTOS" : snapshot.Mode == 1 ? "ARMAZENAMENTO" : snapshot.Mode == 2 ? "COMÉRCIO" : "INVENTÁRIO",
                     28, 90, 750, 50, 40, Ink, true);
                 Text(g, snapshot.Title, 30, 143, 750, 35, 22, Muted, false);
                 if (!passive)
@@ -117,8 +128,14 @@ namespace ElectroInventory
                 else Grid(g, active, nav, false, new Rectangle(26, 230, 912, 458),
                     snapshot.Mode == 2 ? (nav.Trade.Current == TradeTabs.Buy ? "Ofertas da sessão" : "Itens elegíveis do inventário") : "Itens pessoais", 3, passive);
                 var row = count == 0 ? null : active[nav.Selected];
-                DrawDetail(g, row);
-                DrawActions(g, action, result, busy, passive, snapshot.Mode == 2, row);
+                DrawDetail(g, row, nav.Equipment);
+                if (nav.Equipment)
+                {
+                    Text(g, "O equipamento é gerenciado pelo LS RED e pelo GTA V.", 970, 560, 375, 38, 16, Muted, false);
+                    if (ownsInput)
+                        Button(g, new Rectangle(970, 607, 266, 41), "Fechar e usar controles originais", () => CloseRequested = true);
+                }
+                else DrawActions(g, action, result, busy, passive, snapshot.Mode == 2, row);
                 Line(g, 25, 704, Width - 25, 704, Edge);
                 Text(g, snapshot.Mode == 2
                     ? "F10 fecha  ·  Clique ou Ctrl+F2 Comprar/Vender  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela"
@@ -176,7 +193,7 @@ namespace ElectroInventory
                     Text(g, (row.Group == 3 ? "$ " : "×") + Quantity(row.Quantity), badge.X + 4, badge.Y + 2, 58, 19, 14, Cyan, true);
                 }
                 Text(g, row.Name, card.X + 7, card.Y + 35, card.Width - 14, 27, 16, Ink, true);
-                Text(g, row.Group >= 4 ? Summary(row) : row.Category, card.X + 7, card.Bottom - 22, card.Width - 14, 20, 14, selected ? Ink : Muted, false);
+                Text(g, nav.Equipment && row.Group == 1 ? "EQUIPADA" : row.Group >= 4 ? Summary(row) : row.Category, card.X + 7, card.Bottom - 22, card.Width - 14, 20, 14, selected ? Ink : Muted, false);
                 if (!passive) Targets.Add(card, () => { nav.Select(right, index); });
             }
             Text(g, rows.Count == 0 ? "0 entradas" : $"{offset + 1}–{Math.Min(rows.Count, offset + Page)} / {rows.Count}",
@@ -187,7 +204,7 @@ namespace ElectroInventory
                 Button(g, new Rectangle(bounds.Right - 50, bounds.Bottom - 35, 39, 27), "›", () => nav.Select(right, offset + Page));
         }
 
-        private void DrawDetail(Graphics g, Entry row)
+        private void DrawDetail(Graphics g, Entry row, bool equipment)
         {
             Box(g, new Rectangle(951, 230, 419, 458), Color.FromArgb(12, 25, 38), Edge);
             Text(g, "Detalhes", 971, 244, 370, 30, 19, Cyan, true);
@@ -199,7 +216,9 @@ namespace ElectroInventory
             Box(g, new Rectangle(971, 276, 378, 47), Card, Edge);
             DrawIcon(g, row, new Rectangle(1137, 279, 44, 40), Pink);
             Text(g, row.Name, 971, 329, 370, 53, 24, Ink, true);
-            string meta = row.Group >= 4
+            string meta = equipment
+                ? (row.Group == 0 ? "Proteção: " : row.Group == 1 ? "Equipada · Munição: " : "Carregada · Munição: ") + Quantity(row.Quantity)
+                : row.Group >= 4
                 ? (double.IsNaN(row.Price) ? "Preço não informado" : "Preço da oferta  $ " + Quantity(row.Price))
                     + "  ·  " + (double.IsNaN(row.Quantity) ? "Disponibilidade não informada" :
                         (row.Group == TradeTabs.Buy ? "Estoque: " : "Elegíveis: ") + Quantity(row.Quantity))

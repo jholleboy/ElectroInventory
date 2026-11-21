@@ -116,7 +116,10 @@ namespace ElectroInventory
                         sample = next;
                     }
                     else refresh = false;
-                    actions?.Poll(sample?.PublicationStamp ?? 0, sample?.Rows.Count ?? 0);
+                    var previousGear = actions?.Equipment;
+                    actions?.Poll(sample?.PublicationStamp ?? 0, sample?.Rows.Count ?? 0,
+                        sample?.Session ?? Guid.Empty, sample?.Character ?? 0);
+                    refresh |= !ReferenceEquals(previousGear, actions?.Equipment);
                     var revisionNow = actions?.Revision ?? Guid.Empty;
                     var resultNow = actions?.Result ?? ActionResult.None;
                     refresh |= revisionNow != lastRevision || resultNow != lastResult;
@@ -219,12 +222,17 @@ namespace ElectroInventory
                 }
                 if (open)
                 {
+                    var gear = actions?.Equipment;
+                    if (gear?.Session != sample.Session || gear.Character != sample.Character)
+                        gear = null;
+                    if (gear == null) nav.Equipment = false;
+                    var displayed = nav.Equipment ? gear : sample;
                     Size size = Game.Resolution;
                     RectangleF bounds = OverlayViewport.Fit(size, new Size(InventoryView.Width, InventoryView.Height));
                     if (ownsInput)
                     {
                         if (nav.Search || !Game.IsKeyDownRightNow(Keys.LControlKey))
-                            refresh |= Navigate(nav, sample, edges, toggle, togglePressed, escape);
+                            refresh |= Navigate(nav, displayed, edges, toggle, togglePressed, escape);
                         // Frame-local controls expire automatically when the overlay closes.
                         foreach (int control in OverlayControls)
                             NativeFunction.Natives.DISABLE_CONTROL_ACTION(0, control, true);
@@ -266,9 +274,15 @@ namespace ElectroInventory
                         refresh = true;
                     }
                     // The selected object is mapped back to its original snapshot row, not its filtered index.
-                    var items = InventoryView.Items(sample, nav, nav.Right);
+                    if (Pressed(Keys.F1, edges) && ownsInput && !nav.Search && gear != null)
+                    {
+                        nav.ToggleEquipment();
+                        refresh = true;
+                    }
+                    displayed = nav.Equipment ? gear : sample;
+                    var items = InventoryView.Items(displayed, nav, nav.Right);
                     int row = items.Count == 0 ? -1 : sample.Rows.IndexOf(items[Math.Min(items.Count - 1, Math.Max(0, nav.Selected))]);
-                    var offer = actions != null && row >= 0 && row < actions.Offers.Length ? actions.Offers[row] : null;
+                    var offer = !nav.Equipment && actions != null && row >= 0 && row < actions.Offers.Length ? actions.Offers[row] : null;
                     if (sample.Mode == 2 && (row < 0 || !TradeTabs.CanAct(sample.Rows[row], offer))) offer = null;
                     var token = selection.Offer?.Token;
                     selection.Bind(lastRevision, offer);
@@ -308,7 +322,7 @@ namespace ElectroInventory
                     if (size != lastSize || refresh)
                     {
                         string path = Path.Combine(temp, "page-" + revision++ + ".png");
-                        using (var bitmap = layout.Make(sample, nav, demo, ownsInput, selection, actions?.Result ?? ActionResult.None, actions?.Busy == true)) bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                        using (var bitmap = layout.Make(displayed, nav, demo, ownsInput, selection, actions?.Result ?? ActionResult.None, actions?.Busy == true, gear != null)) bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
                         var next = Game.CreateTextureFromFile(path);
                         if (next == null) throw new IOException("Textura da interface indisponível.");
                         try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
