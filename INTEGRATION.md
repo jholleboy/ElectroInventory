@@ -85,3 +85,11 @@ Cabeçalho v2: magic/PID (0/4), timestamp (8), revisão GUID (16), contagem (32)
 | Interface | Ações contextuais, seleção de quantidade, confirmação, retorno, estado vazio, categorias, pesquisa pessoal, paginação e cursor do candidato. | O menu original continua a controlar a entrada nos contextos passivos. A seleção ali usa atalhos com Ctrl. Nenhum contexto é aberto remotamente pelo ElectroInventory. |
 
 Se uma rotina original lançar exceção depois de iniciar, a resposta será incerta. Consulte o inventário antes de decidir repetir a operação. O cliente não tentará compensar alterações por conta própria. O pagamento, o estoque e a persistência pertencem à RC2.
+
+### Comprar e vender na mesma sessão
+
+`Transaction.CreateTransactionMenu` cria `PurchaseMenu` e `SellMenu` a partir do mesmo `ShopMenu`. Os menus mantêm seleções distintas, e a troca nativa pode esconder ou descartar o menu visual oposto. `ProcessTransactionMenu` chama `Update`, que publica um único contexto; o NPC também chama `Update` no próprio loop. O ElectroInventory filtra os grupos 4 e 5 do mesmo snapshot. A mudança de aba é local, sem chamadas a Show, Dispose ou callbacks de seleção, e mantém a transação, câmera e menu nativo ativos.
+
+Use **Ctrl+F2** para alternar, **Ctrl+↑/↓** para selecionar, **Ctrl+←/→** para ajustar e **Ctrl+F3** duas vezes para revisar e confirmar. Uma direção sem linhas elegíveis não pode ser selecionada. Linhas sem cotação confiável ou sem executor continuam consultáveis quando publicadas, mas sem botão de transação habilitado. Em comércio comum, Vender só recebe linhas aceitas pelo catálogo que tenham ao menos uma unidade inteira elegível. Após mudanças no estoque, saldo ou itens, o próximo snapshot atualiza ambas as abas sem trocar a aba corrente; confirmações antigas são descartadas pela mudança de revisão.
+
+A RC2 revalida a existência do submenu construído para cada direção, a linha original do catálogo, a oferta e o contexto no momento da execução. Vender incrementa o contador de compras do comerciante; a ponte não aumenta o estoque de venda se a rotina original não o fizer. NPCs e especializações continuam somente leitura no ElectroInventory.

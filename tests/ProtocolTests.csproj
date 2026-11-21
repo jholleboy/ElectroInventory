@@ -2,6 +2,8 @@
   <PropertyGroup><TargetFramework>net8.0</TargetFramework><OutputType>Exe</OutputType><LangVersion>7.3</LangVersion></PropertyGroup>
   <ItemGroup>
     <Compile Include="../src/Protocol.cs" Link="Protocol.cs" />
+    <Compile Include="../src/TradeRules.cs" Link="TradeRules.cs" />
+    <Compile Include="../src/TradeTabs.cs" Link="TradeTabs.cs" />
     <Compile Include="../src/ActionProtocol.cs" Link="ActionProtocol.cs" />
     <Compile Include="../src/ActionSelection.cs" Link="ActionSelection.cs" />
     <Compile Include="../src/ActionClient.cs" Link="ActionClient.cs" />

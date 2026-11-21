@@ -15,6 +15,7 @@ internal static class Program
     {
         CheckOverlayInput();
         CheckActions();
+        CheckTrade();
         var snapshot = new Snapshot { Session = Guid.NewGuid(), Character = 41, Title = "Inventário" };
         var empty = Protocol.Decode(Protocol.Encode(snapshot));
         Require(empty.Rows.Count == 0 && empty.Session == snapshot.Session);
@@ -99,6 +100,57 @@ internal static class Program
         selection.Bind(nextRevision, offer);
         Require(!selection.Confirming && selection.Quantity == 1);
         Console.WriteLine("Ações: autorização, revisão aposentada, sessão, token, frações, preço e confirmação passaram.");
+    }
+
+    private static void CheckTrade()
+    {
+        var tabs = new ElectroInventory.TradeTabs();
+        var shop = new Snapshot { Mode = 2, Session = Guid.NewGuid(), Character = 1, Balance = 10 };
+        var buy = new Entry { Group = 4, Id = "item", Price = 4, Quantity = 2 };
+        var sell = new Entry { Group = 5, Id = "item", Price = 2, Quantity = 1 };
+        shop.Rows.Add(buy);
+        tabs.Open(shop);
+        Require(!tabs.Toggle(shop) && tabs.Current == 4);
+        shop.Rows.Clear();
+        shop.Rows.Add(sell);
+        tabs.Open(shop);
+        Require(!tabs.Toggle(shop) && tabs.Current == 5);
+        shop.Rows.Add(buy);
+        Require(tabs.Toggle(shop) && tabs.Current == 4 && tabs.Toggle(shop) && tabs.Current == 5);
+        Require(ElectroInventory.TradeTabs.RestoreSelection(new System.Collections.Generic.List<Entry> { sell }, 0,
+            new System.Collections.Generic.List<Entry> { new Entry { Group = 5, Id = "other" }, sell }) == 1);
+
+        var offer = new ActionOffer { Token = Guid.NewGuid(), Kinds = ActionKind.Buy, Maximum = 2 };
+        Require(ElectroInventory.TradeTabs.CanAct(buy, offer) && !ElectroInventory.TradeTabs.CanAct(sell, offer));
+        buy.Price = double.NaN;
+        Require(!ElectroInventory.TradeTabs.CanAct(buy, offer));
+        Require(!TradeRules.QuoteAllows(true, 4, 5, 1, 2, 10, true));
+        Require(!TradeRules.QuoteAllows(true, 4, 4, 3, 2, 100, true));
+        Require(!TradeRules.QuoteAllows(false, 2, 2, 1, 2, 10, false));
+        Require(TradeRules.SellLimit(.5f, -1, 0) == 0 && TradeRules.BuyLimit(10, 3, 4) == 0);
+
+        Guid revision = Guid.NewGuid();
+        var command = new ActionCommand { Id = Guid.NewGuid(), Session = shop.Session, Revision = revision,
+            Token = offer.Token, Kind = ActionKind.Buy, Quantity = 1 };
+        Require(ActionProtocol.Authorize(command, shop.Session, revision, offer));
+        Require(!ActionProtocol.Authorize(command, shop.Session, Guid.NewGuid(), offer));
+        Require(!ActionProtocol.Authorize(command, Guid.Empty, revision, offer));
+
+        // Model the balances and counters that the original executors update, in both orders.
+        foreach (bool buyFirst in new[] { true, false })
+        {
+            int balance = 10, held = 1, sold = 0, bought = 0;
+            foreach (bool buying in new[] { buyFirst, !buyFirst })
+            {
+                int max = buying ? TradeRules.BuyLimit(10, 2, sold) : TradeRules.SellLimit(held, 2, bought);
+                int price = buying ? 4 : 2;
+                Require(TradeRules.QuoteAllows(true, price, price, 1, max, balance, buying));
+                if (buying) { sold++; held++; balance -= price; }
+                else { bought++; held--; balance += price; }
+            }
+            Require(balance == 8 && held == 1 && sold == 1 && bought == 1);
+        }
+        Console.WriteLine("Comércio: abas, cotação, limites, sequências modeladas e rejeição de repetição passaram.");
     }
 
     private static void CheckOverlayInput()

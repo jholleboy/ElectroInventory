@@ -45,3 +45,9 @@ Rodada final em save de teste:
 3. Transfira unidades inteiras em um ponto sem animação com saldo fracionário. Compare ambas as pilhas. Teste restrição de tipo, menu fechado, veículo que se afasta e armazenamento com animação. Confira que armas e dinheiro seguem visíveis em leitura.
 4. Compre e venda em transação genérica. Compare preço, dinheiro, estoque, unidade/pacote e saldo. Tente dois cliques rápidos e teste oferta sem estoque, mudança de preço e débito insuficiente. Verifique NPCs e lojas especializadas pelo menu original.
 5. Confira F10 e Ctrl+F3 em menus originais, prioridade dos atalhos, troca de sessão, fechamento com I/Esc, cursor e coexistência com ElectroHud V6. Faça uma operação, salve pelo fluxo original e confira o estado após recarregar.
+
+### Sessão Comprar/Vender
+
+O console testa alternância entre abas com duas ou apenas uma direção, seleção identificada após atualização, preço alterado, saldo, estoque, item rejeitado, sessão inválida e revisão aposentada. As sequências compra/venda e venda/compra são modeladas com os contadores consumidos pelas regras de cotação. A execução dos menus reais continua pendente.
+
+No teste integrado, abra F10 num comerciante comum que compre e venda. Use Ctrl+F2 mantendo a câmera e o menu nativo ativos. Compre um item elegível e confirme seu aparecimento em Vender; inverta a ordem e compare os contadores, saldos e pilhas com a RC2. Tente duplo acionamento, mudança de preço, última unidade, fechamento da sessão e comerciante indisponível. Repita em loja de direção única e em NPC com executor não habilitado.
