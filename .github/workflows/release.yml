@@ -3,10 +3,15 @@ name: ElectroInventory Legacy release
 on:
   workflow_dispatch:
     inputs:
+      build_only:
+        description: 'Validar no runner privado sem distribuir arquivos'
+        type: boolean
+        default: true
       version:
         description: 'Tag da candidata, por exemplo v4.0.0'
         required: true
         type: string
+        default: v4.0.0
   push:
     tags:
       - 'v*'
@@ -34,6 +39,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ inputs.version || github.ref_name }}
+          BUILD_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.build_only }}
         run: |
           set -euo pipefail
           [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
@@ -41,7 +47,7 @@ jobs:
           git merge-base --is-ancestor "$sha" refs/remotes/origin/main
           if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
             [[ "$GITHUB_REF" == refs/heads/main ]]
-            if git show-ref --verify --quiet "refs/tags/$VERSION"; then
+            if [[ "$BUILD_ONLY" != true ]] && git show-ref --verify --quiet "refs/tags/$VERSION"; then
               [[ "$(git rev-parse "refs/tags/$VERSION^{commit}")" == "$sha" ]]
             fi
           else
@@ -81,14 +87,26 @@ jobs:
       - name: Build, test and verify installation ZIP
         shell: powershell
         run: |
+          Write-Host "Modo privado: ${{ github.event_name == 'workflow_dispatch' && inputs.build_only }}"
           & .\inventory\release\BUILD_FULL.ps1 -Version $env:RELEASE_VERSION -GtaVDirectory $env:GTA_LEGACY -Rc2Directory .\rc2 -HudDirectory .\hud
+      - name: Report Windows validation
+        if: ${{ always() }}
+        shell: powershell
+        env:
+          BUILD_STATUS: ${{ job.status }}
+          BUILD_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.build_only }}
+        run: |
+          $mode = if ($env:BUILD_ONLY -eq 'true') { 'Validacao privada' } else { 'Candidata para publicacao' }
+          "$mode - resultado da validacao Windows: $env:BUILD_STATUS" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
       - name: Verify artifact distribution authorization
+        if: ${{ github.event_name == 'push' || inputs.build_only == false }}
         shell: powershell
         env:
           LSR_REDISTRIBUTION_APPROVED: ${{ vars.LSR_REDISTRIBUTION_APPROVED }}
         run: |
           if ($env:LSR_REDISTRIBUTION_APPROVED -cne 'true') { throw 'A autorização de redistribuição do LS RED não foi configurada.' }
       - uses: actions/upload-artifact@v4
+        if: ${{ github.event_name == 'push' || inputs.build_only == false }}
         with:
           name: verified-legacy-package
           path: inventory/artifacts/release/*
@@ -96,6 +114,7 @@ jobs:
           retention-days: 3
 
   publish:
+    if: ${{ github.event_name == 'push' || inputs.build_only == false }}
     needs: [validate-ref, build]
     runs-on: ubuntu-latest
     environment: release-publish

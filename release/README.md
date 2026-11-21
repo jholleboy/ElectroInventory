@@ -10,8 +10,14 @@ A compilação fica no Windows self-hosted. O job de publicação roda no ambien
 
 ## Disparar e conferir
 
-Em Actions → ElectroInventory Legacy release, execute manualmente sobre **main**, informando uma versão como `v4.0.0`. O workflow cria a tag somente após build, testes, validação de pacote e autorização. Enviar uma tag `v*` aprovada também dispara o fluxo. Use `v4.0.1`, `v4.1.0` etc. quando os respectivos commits estiverem prontos. Uma execução nunca sobrescreve uma release existente. Se restar um rascunho após falha de publicação, o mantenedor deve verificar o rascunho e removê-lo ou completá-lo manualmente antes de repetir com a mesma tag.
+Em Actions → ElectroInventory Legacy release, execute manualmente sobre **main** com **build_only** desmarcado, informando uma versão como `v4.0.0`. O workflow cria a tag somente após build, testes, validação de pacote e autorização. Enviar uma tag `v*` aprovada também dispara o fluxo. Use `v4.0.1`, `v4.1.0` etc. quando os respectivos commits estiverem prontos. Uma execução nunca sobrescreve uma release existente. Se restar um rascunho após falha de publicação, o mantenedor deve verificar o rascunho e removê-lo ou completá-lo manualmente antes de repetir com a mesma tag.
 
 O script restaura apenas os 30 fontes ausentes do commit oficial fixado e aplica os patches HUD e Inventory, nessa ordem. O ZIP usa uma lista de arquivos permitidos. O workflow confere a arquitetura e os hashes de build, reabre o ZIP, valida o hash de cada entrada e publica os três assets em uma prerelease. A DLL do ElectroHud fica fora do pacote. Promova a prerelease somente depois de confirmar os testes dentro do GTA V.
 
 Se for preciso depurar o job localmente, use um checkout **descartável e limpo** da RC2. Defina a mesma informação de SDK e execute `release/BUILD_FULL.ps1` com os caminhos de RC2 e ElectroHud e a versão desejada. O script restaura e aplica patches diretamente nessa cópia de trabalho.
+
+### Primeira validação privada
+
+Em **Actions → ElectroInventory Legacy release → Run workflow**, escolha **main** e mantenha **build_only** marcado (padrão). A versão serve apenas para identificar esse build local. O runner executa a mesma compilação, os testes e a verificação das DLLs, do catálogo e do ZIP. O resumo mostra o resultado; abra o log do build para ver cada etapa ou a etapa da falha.
+
+O modo privado requer o runner dedicado `electroinventory-release`, o SDK oficial e as variáveis de build documentadas acima. Ele dispensa `LSR_REDISTRIBUTION_APPROVED` e `release-publish`. O ZIP fica no runner, sem upload, tag ou release. Para a publicação autorizada, desmarque **build_only** ao disparar manualmente ou envie a tag aprovada.
