@@ -12,6 +12,7 @@ namespace ElectroInventory
         public bool Search;
         public int Selected, Offset, CategoryOffset;
         public bool Right;
+        public readonly TradeTabs Trade = new TradeTabs();
         public void Reset() { Query = Category = ""; Search = Right = false; Selected = Offset = CategoryOffset = 0; }
         public void Filter(string category) { Category = category; Selected = Offset = 0; }
     }
@@ -29,6 +30,7 @@ namespace ElectroInventory
         {
             var compare = System.Globalization.CultureInfo.GetCultureInfo("pt-BR").CompareInfo;
             return snapshot.Rows.Where(row => (snapshot.Mode != 1 || (row.Group != 0) == right)
+                && (snapshot.Mode != 2 || row.Group == nav.Trade.Current)
                 && (nav.Category.Length == 0 || row.Category == nav.Category)
                 && compare.IndexOf(row.Name ?? "", nav.Query, System.Globalization.CompareOptions.IgnoreCase |
                     System.Globalization.CompareOptions.IgnoreNonSpace) >= 0).ToList();
@@ -58,6 +60,7 @@ namespace ElectroInventory
                 else if (!double.IsNaN(snapshot.Balance))
                     Text(g, "Saldo aplicável  $ " + Quantity(snapshot.Balance), 1004, 107, 355, 30, 19, Cyan, true);
 
+                if (snapshot.Mode == 2) DrawTradeTabs(g, snapshot, nav);
                 var categories = snapshot.Rows.Select(x => x.Category).Where(x => !string.IsNullOrWhiteSpace(x))
                     .Distinct().ToList();
                 categories.Insert(0, "");
@@ -86,16 +89,35 @@ namespace ElectroInventory
                     Grid(g, Items(snapshot, nav, true), nav, true, new Rectangle(488, 230, 450, 458), "Armazenamento", 3, passive);
                 }
                 else Grid(g, active, nav, false, new Rectangle(26, 230, 912, 458),
-                    snapshot.Mode == 2 ? "Ofertas da sessão" : "Itens pessoais", 3, passive);
+                    snapshot.Mode == 2 ? (nav.Trade.Current == TradeTabs.Buy ? "Ofertas da sessão" : "Itens elegíveis do inventário") : "Itens pessoais", 3, passive);
                 DrawDetail(g, count == 0 ? null : active[nav.Selected]);
                 DrawActions(g, action, result, busy, passive);
                 Line(g, 25, 704, Width - 25, 704, Edge);
-                Text(g, passive ? "F10 fecha  ·  Ctrl+F6 troca lado  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F4 ação  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela" :
+                Text(g, snapshot.Mode == 2
+                    ? "F10 fecha  ·  Ctrl+F2 Comprar/Vender  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela"
+                    : passive ? "F10 fecha  ·  Ctrl+F6 troca lado  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F4 ação  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela" :
                     "Setas/mouse  Navegar  ·  PgUp/PgDn/roda  Página  ·  /  Pesquisar  ·  Ctrl+F4  Ação  ·  Ctrl+F3  Confirmar  ·  I/Esc  Fechar",
                     28, 718, 1150, 27, 16, Muted, false);
                 if (snapshot.Incomplete) Text(g, "Lista parcial", 1230, 718, 145, 27, 16, Pink, true);
             }
             return image;
+        }
+
+        private static void DrawTradeTabs(Graphics g, Snapshot snapshot, Navigation nav)
+        {
+            foreach (byte group in new[] { TradeTabs.Buy, TradeTabs.Sell })
+            {
+                bool present = TradeTabs.HasRows(snapshot, group);
+                bool selected = nav.Trade.Current == group;
+                int x = group == TradeTabs.Buy ? 28 : 198;
+                var rect = new Rectangle(x, 180, 157, 39);
+                Box(g, rect, Card, selected ? Cyan : Edge);
+                Text(g, group == TradeTabs.Buy ? "COMPRAR" : "VENDER", x + 12, 188, 130, 24, 16,
+                    present && selected ? Cyan : Muted, true);
+            }
+            string reason = !TradeTabs.HasRows(snapshot, TradeTabs.Buy) ? "Compra: sem ofertas deste comerciante." :
+                !TradeTabs.HasRows(snapshot, TradeTabs.Sell) ? "Venda: nenhum item elegível ou comerciante não compra." : "";
+            Text(g, reason, 376, 186, 740, 34, 16, Muted, false);
         }
 
         public bool CloseRequested, ActionRequested;
@@ -146,7 +168,7 @@ namespace ElectroInventory
             Text(g, status, 970, 655, 380, 26, 15, Muted, false);
             if (action.Kind == ActionKind.None || busy)
             {
-                if (!busy) Text(g, "Nenhuma ação autorizada para esta seleção.", 970, 603, 380, 42, 16, Muted, false);
+                if (!busy) Text(g, "Ação indisponível para esta seleção na sessão atual.", 970, 603, 380, 42, 16, Muted, false);
                 return;
             }
             string label = ActionSelection.Label(action.Kind);

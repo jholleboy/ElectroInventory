@@ -102,6 +102,9 @@ namespace ElectroInventory
                     {
                         if (open && (next == null || next.Session != session))
                         { open = false; ReleaseTexture(); log("Sessão encerrada ou alterada."); }
+                        if (open && sample?.Mode == 2 && next?.Mode == 2)
+                            nav.Selected = TradeTabs.RestoreSelection(InventoryView.Items(sample, nav, false),
+                                nav.Selected, InventoryView.Items(next, nav, false));
                         sample = next;
                     }
                     else refresh = false;
@@ -144,6 +147,7 @@ namespace ElectroInventory
                     passive = sample.Mode != 0;
                     session = sample.Session;
                     nav.Reset();
+                    if (sample.Mode == 2) nav.Trade.Open(sample);
                     selection.Bind(Guid.Empty, null);
                     layout.CloseRequested = false;
                     layout.ActionRequested = false;
@@ -195,10 +199,20 @@ namespace ElectroInventory
                         if (Pressed(Keys.F8, edges)) { nav.Selected += InventoryView.Page; refresh = true; }
                         if (Pressed(Keys.F6, edges) && sample.Mode == 1) { nav.Right = !nav.Right; nav.Selected = 0; refresh = true; }
                     }
+                    bool switchTab = Pressed(Keys.F2, edges);
+                    if (sample.Mode == 2 && switchTab && Game.IsKeyDownRightNow(Keys.LControlKey)
+                        && nav.Trade.Toggle(sample))
+                    {
+                        nav.Filter("");
+                        selection.Bind(Guid.Empty, null);
+                        layout.ActionRequested = false;
+                        refresh = true;
+                    }
                     // The selected object is mapped back to its original snapshot row, not its filtered index.
                     var items = InventoryView.Items(sample, nav, nav.Right);
                     int row = items.Count == 0 ? -1 : sample.Rows.IndexOf(items[Math.Min(items.Count - 1, Math.Max(0, nav.Selected))]);
                     var offer = actions != null && row >= 0 && row < actions.Offers.Length ? actions.Offers[row] : null;
+                    if (sample.Mode == 2 && (row < 0 || !TradeTabs.CanAct(sample.Rows[row], offer))) offer = null;
                     var token = selection.Offer?.Token;
                     selection.Bind(lastRevision, offer);
                     refresh |= token != selection.Offer?.Token;
