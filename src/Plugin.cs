@@ -19,6 +19,7 @@ namespace ElectroInventory
     {
         public bool Enabled { get; set; } = true;
         public bool Diagnostics { get; set; } = true;
+        public bool ItemImages { get; set; } = true;
         public string Mode { get; set; } = "Live";
         public string ToggleKey { get; set; } = "I";
         public string InspectKey { get; set; } = "F10";
@@ -60,16 +61,17 @@ namespace ElectroInventory
                 using (IDataSource source = demo ? (IDataSource)new DemoDataSource() : new LsrReadOnlyDataSource(pid, log))
                 using (IDataSource unavailable = new UnavailableDataSource())
                 using (var actions = demo ? null : new ActionClient(pid))
-                    Run(source, unavailable, actions, config, demo, log);
+                using (var artwork = new ItemArtwork(config.ItemImages ? Path.Combine("Plugins", "ElectroInventory", "items") : null))
+                    Run(source, unavailable, actions, artwork, config, demo, log);
             }
             catch (ThreadAbortException) { throw; }
             catch (Exception e) { Game.LogTrivial("[ElectroInventory] Falha: " + e.GetType().Name + " " + e.Message); }
             finally { Finally(); }
         }
 
-        private static void Run(IDataSource source, IDataSource unavailable, ActionClient actions, Settings config, bool demo, Action<string> log)
+        private static void Run(IDataSource source, IDataSource unavailable, ActionClient actions, ItemArtwork artwork, Settings config, bool demo, Action<string> log)
         {
-            var layout = new InventoryView();
+            var layout = new InventoryView(artwork);
             var nav = new Navigation();
             var selection = new ActionSelection();
             ActionResult lastResult = ActionResult.None;

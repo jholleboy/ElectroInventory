@@ -24,6 +24,8 @@ namespace ElectroInventory
         private static readonly Color Ink = Color.FromArgb(231, 245, 250), Muted = Color.FromArgb(157, 177, 194);
         private static readonly Color CardSelected = Color.FromArgb(23, 54, 68);
         private static readonly Color Card = Color.FromArgb(19, 36, 53), Edge = Color.FromArgb(49, 76, 94);
+        private readonly ItemArtwork artwork;
+        public InventoryView(ItemArtwork artwork) { this.artwork = artwork; }
         public readonly HitTargets Targets = new HitTargets();
 
         public static List<Entry> Items(Snapshot snapshot, Navigation nav, bool right)
@@ -141,21 +143,32 @@ namespace ElectroInventory
                 bool selected = nav.Right == right && nav.Selected == index;
                 Box(g, card, selected ? CardSelected : Card, selected ? Cyan : Edge);
                 if (selected) Line(g, card.Left + 2, card.Bottom - 3, card.Right - 3, card.Bottom - 3, Pink);
-                Text(g, Glyph(row), card.X + 7, card.Y + 7, 34, 25, 20, selected ? Pink : Cyan, true);
+                DrawIcon(g, row, new Rectangle(card.X + 8, card.Y + 6, 29, 27), selected ? Pink : Cyan);
+                if (!double.IsNaN(row.Quantity) && row.Group < 4)
+                {
+                    var badge = new Rectangle(card.Right - 72, card.Y + 7, 65, 23);
+                    Box(g, badge, Color.FromArgb(9, 25, 38), Edge);
+                    Text(g, "×" + Quantity(row.Quantity), badge.X + 4, badge.Y + 2, 58, 19, 14, Cyan, true);
+                }
                 Text(g, row.Name, card.X + 7, card.Y + 35, card.Width - 14, 27, 16, Ink, true);
-                Text(g, Summary(row), card.X + 7, card.Bottom - 22, card.Width - 14, 20, 14, selected ? Ink : Muted, false);
+                Text(g, row.Group >= 4 ? Summary(row) : row.Category, card.X + 7, card.Bottom - 22, card.Width - 14, 20, 14, selected ? Ink : Muted, false);
                 if (!passive) Targets.Add(card, () => { nav.Right = right; nav.Selected = index; nav.Search = false; });
             }
             Text(g, rows.Count == 0 ? "0 entradas" : $"{offset + 1}–{Math.Min(rows.Count, offset + Page)} / {rows.Count}",
                 bounds.X + 12, bounds.Bottom - 32, bounds.Width - 24, 23, 15, Muted, false);
         }
 
-        private static void DrawDetail(Graphics g, Entry row)
+        private void DrawDetail(Graphics g, Entry row)
         {
             Box(g, new Rectangle(951, 230, 419, 458), Color.FromArgb(12, 25, 38), Edge);
             Text(g, "Detalhes", 971, 244, 370, 30, 19, Cyan, true);
-            if (row == null) return;
-            Text(g, Glyph(row), 971, 276, 365, 52, 36, Pink, true);
+            if (row == null)
+            {
+                Text(g, "Nenhum item selecionado.", 971, 291, 370, 32, 19, Muted, false);
+                return;
+            }
+            Box(g, new Rectangle(971, 276, 378, 47), Card, Edge);
+            DrawIcon(g, row, new Rectangle(1137, 279, 44, 40), Pink);
             Text(g, row.Name, 971, 329, 370, 53, 24, Ink, true);
             Text(g, row.Category + "  ·  " + Summary(row), 971, 381, 370, 35, 17, Cyan, false);
             Text(g, row.Description, 971, 424, 370, 83, 19, Ink, false);
@@ -192,6 +205,20 @@ namespace ElectroInventory
             Button(g, new Rectangle(1154, 595, 84, 41), "Ação ›", action.NextKind);
             Button(g, new Rectangle(1245, 595, 44, 41), "−", () => action.Adjust(-1));
             Button(g, new Rectangle(1296, 595, 44, 41), "+", () => action.Adjust(1));
+        }
+
+        private void DrawIcon(Graphics g, Entry row, Rectangle bounds, Color color)
+        {
+            var image = artwork.Get(row.Id);
+            if (image != null)
+            {
+                float scale = Math.Min(bounds.Width / (float)image.Width, bounds.Height / (float)image.Height);
+                float width = image.Width * scale, height = image.Height * scale;
+                g.DrawImage(image, new RectangleF(bounds.X + (bounds.Width - width) / 2,
+                    bounds.Y + (bounds.Height - height) / 2, width, height));
+                return;
+            }
+            Text(g, Glyph(row), bounds.X + 3, bounds.Y, bounds.Width - 3, bounds.Height, bounds.Height - 5, color, true);
         }
 
         private static string Glyph(Entry row)

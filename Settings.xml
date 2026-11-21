@@ -2,6 +2,7 @@
 <ElectroInventory>
   <Enabled>true</Enabled>
   <Mode>Live</Mode>
+  <ItemImages>true</ItemImages>
   <Diagnostics>true</Diagnostics>
   <ToggleKey>I</ToggleKey>
   <InspectKey>F10</InspectKey>
