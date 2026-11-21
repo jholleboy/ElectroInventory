@@ -98,10 +98,10 @@ index 0000000000000000000000000000000000000000..10c0c17fd8fbb81f775e47d0c058b35c
 +}
 diff --git a/Los Santos RED/ElectroInventoryActionServer.cs b/Los Santos RED/ElectroInventoryActionServer.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..e17e8a36ddf6f13c91e493529348eb1ea4be3903
+index 0000000000000000000000000000000000000000..af394f1531590c9cefa14c55764545ef3150d16f
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryActionServer.cs	
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,177 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Diagnostics;
@@ -171,7 +171,9 @@ index 0000000000000000000000000000000000000000..e17e8a36ddf6f13c91e493529348eb1e
 +                            !focusEligible ? "sem pool/contexto elegível" : "aguardando solicitação vigente";
 +                        string summary = $"modo {snapshot.Mode} / {(focusEligible ? "pool da interação" : "pool sem concessão")} / foco {reason}; " +
 +                            $"comprar {snapshot.Rows.Count(x => x.Group == 4)}, vender {snapshot.Rows.Count(x => x.Group == 5)}, " +
-+                            $"autorizações {current.Count(x => x != null)}";
++                            $"autorizações {current.Count(x => x != null)}" +
++                            string.Concat(snapshot.Rows.Where(row => row.DiagnosticReason != null)
++                                .GroupBy(row => row.DiagnosticReason).Select(group => $"; {group.Key}: {group.Count()}"));
 +                        if (summary != lastDiagnostic)
 +                        {
 +                            lastDiagnostic = summary;
@@ -279,10 +281,10 @@ index 0000000000000000000000000000000000000000..e17e8a36ddf6f13c91e493529348eb1e
 +}
 diff --git a/Los Santos RED/ElectroInventoryProtocol.cs b/Los Santos RED/ElectroInventoryProtocol.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..d5db8ff9ac0c0faed48803708c1cb4bf7b1cea00
+index 0000000000000000000000000000000000000000..0af08027e3e9c38830b3d850e2708d9cc31a0951
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryProtocol.cs	
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,137 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Diagnostics;
@@ -297,6 +299,7 @@ index 0000000000000000000000000000000000000000..d5db8ff9ac0c0faed48803708c1cb4bf
 +        public double Quantity = double.NaN;
 +        public double Price = double.NaN;
 +        internal object TradeBinding;
++        internal string DiagnosticReason;
 +        public byte Group; // 0 player/items, 1 stored items, 2 weapons, 3 cash, 4 buy, 5 sell
 +    }
 +
@@ -421,10 +424,10 @@ index 0000000000000000000000000000000000000000..d5db8ff9ac0c0faed48803708c1cb4bf
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..ca78f2bf1690465c7e7a829067af2395cbf2fb5f
+index 0000000000000000000000000000000000000000..87878c603fcf18553ca45c06d7b4c5d2ae1c38a7
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
-@@ -0,0 +1,302 @@
+@@ -0,0 +1,352 @@
 +using ElectroInventory.Wire;
 +using Rage;
 +using System;
@@ -459,6 +462,7 @@ index 0000000000000000000000000000000000000000..ca78f2bf1690465c7e7a829067af2395
 +        private static Action<Snapshot> fill;
 +        private static Guid contextSession;
 +        private static long touch;
++        private static bool vehicleTransferFeedback;
 +        private MemoryMappedFile map;
 +        private MemoryMappedViewAccessor view;
 +        private Mutex mutex;
@@ -535,6 +539,7 @@ index 0000000000000000000000000000000000000000..ca78f2bf1690465c7e7a829067af2395
 +        private sealed class StorageAuthority
 +        {
 +            public SimpleInventory Items;
++            public bool AnimateAfterCommit;
 +            public List<ItemType> Allowed, Denied;
 +
 +            public bool Includes(ItemType type) => Allowed != null && Allowed.Count > 0
@@ -549,17 +554,27 @@ index 0000000000000000000000000000000000000000..ca78f2bf1690465c7e7a829067af2395
 +
 +        private static InventoryActionBinding StorageBinding(ModController controller, Snapshot snapshot, Entry row)
 +        {
-+            if (!(snapshot.StorageContext is StorageAuthority authority) || (row.Group != 0 && row.Group != 1))
-+                return null;
++            if (row.Group != 0 && row.Group != 1)
++                return ExplainStorage(row, "Armas e dinheiro usam o menu original.");
++            if (!(snapshot.StorageContext is StorageAuthority authority))
++                return ExplainStorage(row, "Recipiente sem executor seguro neste contexto.");
 +            var player = controller.Player;
 +            bool take = row.Group == 1;
 +            var source = take ? authority.Items.ItemsList : player.Inventory.ItemsList;
 +            var target = take ? player.Inventory.ItemsList : authority.Items.ItemsList;
 +            var item = source.Find(candidate => candidate.ModItem?.Name == row.Id);
-+            if (item == null || !authority.Includes(item.ModItem.ItemType) || row.Quantity < 1
-+                || row.Quantity >= int.MaxValue || source.FindLast(candidate => candidate.ModItem?.Name == row.Id) != item
++            if (item == null) return ExplainStorage(row, "Pilha indisponível.");
++            if (!authority.Includes(item.ModItem.ItemType)) return ExplainStorage(row, "Tipo bloqueado pelo recipiente.");
++            if (row.Quantity < 1 || row.Quantity >= int.MaxValue)
++                return ExplainStorage(row, "Nenhuma unidade inteira transferível.");
++            if (source.FindLast(candidate => candidate.ModItem?.Name == row.Id) != item
 +                || target.Find(candidate => candidate.ModItem?.Name == row.Id) != target.FindLast(candidate => candidate.ModItem?.Name == row.Id))
-+                return null;
++                return ExplainStorage(row, "Pilhas ambíguas; use o menu original.");
++            if (authority.AnimateAfterCommit &&
++                item.ModItem.GetType().GetMethod(nameof(ModItem.PerformItemAnimation))?.DeclaringType != typeof(ModItem))
++                return ExplainStorage(row, "Animação especializada; use o menu original.");
++            if (vehicleTransferFeedback || player.ActivityManager.IsPerformingActivity)
++                return ExplainStorage(row, "Aguarde a atividade atual.");
 +            int maximum = (int)Math.Floor(row.Quantity);
 +            return new InventoryActionBinding
 +            {
@@ -567,7 +582,8 @@ index 0000000000000000000000000000000000000000..ca78f2bf1690465c7e7a829067af2395
 +                    Maximum = maximum },
 +                Execute = command =>
 +                {
-+                    if (!ContextStillValid(controller, snapshot) || source.Find(candidate => candidate.ModItem?.Name == row.Id) != item
++                    if (!ContextStillValid(controller, snapshot) || vehicleTransferFeedback || player.ActivityManager.IsPerformingActivity
++                        || source.Find(candidate => candidate.ModItem?.Name == row.Id) != item
 +                        || source.FindLast(candidate => candidate.ModItem?.Name == row.Id) != item || item.RemainingPercent != row.Quantity
 +                        || !authority.Includes(item.ModItem.ItemType) || command.Quantity > Math.Floor(item.RemainingPercent))
 +                        return ActionResult.Expired;
@@ -576,10 +592,46 @@ index 0000000000000000000000000000000000000000..ca78f2bf1690465c7e7a829067af2395
 +                        || controller.ModDataFileManager.ModItems.Get(row.Id) == null
 +                        || !ActionProtocol.ExactTransfer(item.RemainingPercent, destination?.RemainingPercent ?? 0, command.Quantity))
 +                        return ActionResult.Rejected;
-+                    return item.ModItem.TransferElectroInventory(player, authority.Items, command.Quantity, take, false)
-+                        ? ActionResult.Success : ActionResult.Rejected;
++                    // Commit both inventories through the shared executor, without a yield between debit and credit.
++                    if (!item.ModItem.TransferElectroInventory(player, authority.Items, command.Quantity, take, false))
++                        return ActionResult.Rejected;
++                    if (authority.AnimateAfterCommit)
++                        StartVehicleTransferFeedback(controller, snapshot, item.ModItem, take);
++                    return ActionResult.Success;
 +                }
 +            };
++        }
++
++        private static InventoryActionBinding ExplainStorage(Entry row, string reason)
++        {
++            row.Detail = string.IsNullOrEmpty(row.Detail) ? reason : row.Detail + " · " + reason;
++            row.DiagnosticReason = reason;
++            return null;
++        }
++
++        private static void StartVehicleTransferFeedback(ModController controller, Snapshot snapshot, ModItem item, bool take)
++        {
++            vehicleTransferFeedback = true;
++            try
++            {
++                GameFiber.StartNew(() =>
++                {
++                    try
++                    {
++                        if (ContextStillValid(controller, snapshot))
++                            controller.Player.ActivityManager.PerformItemAnimation(item, take);
++                    }
++                    catch (ThreadAbortException) { throw; }
++                    catch (Exception) { Game.LogTrivial("[ElectroInventory RC2] Animação após transferência interrompida."); }
++                    finally { vehicleTransferFeedback = false; }
++                }, "ElectroInventoryVehicleFeedback");
++            }
++            catch (ThreadAbortException) { vehicleTransferFeedback = false; throw; }
++            catch (Exception)
++            {
++                vehicleTransferFeedback = false;
++                Game.LogTrivial("[ElectroInventory RC2] Transferência concluída; animação indisponível.");
++            }
 +        }
 +
 +        private static InventoryActionBinding TradeBinding(ModController controller, Snapshot snapshot, Entry row)
@@ -592,11 +644,12 @@ index 0000000000000000000000000000000000000000..ca78f2bf1690465c7e7a829067af2395
 +        }
 +
 +        internal static void Storage(Snapshot snapshot, string title, SimpleInventory items,
-+            WeaponStorage weapons, CashStorage cash, List<ItemType> allowed, List<ItemType> denied, bool withAnimations)
++            WeaponStorage weapons, CashStorage cash, List<ItemType> allowed, List<ItemType> denied, bool withAnimations, bool vehicle = false)
 +        {
 +            snapshot.Mode = 1;
-+            if (!withAnimations && items != null)
-+                snapshot.StorageContext = new StorageAuthority { Items = items, Allowed = allowed, Denied = denied };
++            if ((!withAnimations || vehicle) && items != null)
++                snapshot.StorageContext = new StorageAuthority { Items = items, Allowed = allowed, Denied = denied,
++                    AnimateAfterCommit = vehicle && withAnimations };
 +            snapshot.Title = title;
 +            var restrictions = new List<string>();
 +            if (items != null) restrictions.Add("Itens");
@@ -663,6 +716,9 @@ index 0000000000000000000000000000000000000000..ca78f2bf1690465c7e7a829067af2395
 +                }
 +                if (snapshot.Mode != 2 && player.Inventory != null)
 +                    CopyItems(snapshot, player.Inventory.ItemsList, 0);
++                var bindings = snapshot.Rows.ConvertAll(row => snapshot.Mode == 1
++                    ? StorageBinding(controller, snapshot, row) : snapshot.Mode == 2
++                    ? TradeBinding(controller, snapshot, row) : PersonalBinding(controller, snapshot, row));
 +                byte[] payload = Protocol.Encode(snapshot);
 +                int pid;
 +                using (var process = Process.GetCurrentProcess()) pid = process.Id;
@@ -690,9 +746,6 @@ index 0000000000000000000000000000000000000000..ca78f2bf1690465c7e7a829067af2395
 +                    view.Write(16, stamp);
 +                }
 +                finally { if (held) mutex.ReleaseMutex(); }
-+                var bindings = snapshot.Rows.ConvertAll(row => snapshot.Mode == 1
-+                    ? StorageBinding(controller, snapshot, row) : snapshot.Mode == 2
-+                    ? TradeBinding(controller, snapshot, row) : PersonalBinding(controller, snapshot, row));
 +                actions.Update(pid, stamp, snapshot, payload, bindings,
 +                    snapshot.Mode != 0 && !snapshot.NativeTradeOnly && focusPool != null && ContextStillValid(controller, snapshot));
 +            }
@@ -957,10 +1010,10 @@ index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..575a7b8611ebfada052780a9c501701c
          Player.ActivityManager.IsInteractingWithLocation = false;
          Player.IsTransacting = false;
 diff --git a/Los Santos RED/lsr/Locations/Places/Transaction.cs b/Los Santos RED/lsr/Locations/Places/Transaction.cs
-index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..31b058210fa74e265ca6ac687e83cf9f9b2ae274 100644
+index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..ad89f4236dd5effdeefbac18fde64953b8ad0437 100644
 --- a/Los Santos RED/lsr/Locations/Places/Transaction.cs	
 +++ b/Los Santos RED/lsr/Locations/Places/Transaction.cs	
-@@ -63,8 +63,146 @@ public class Transaction
+@@ -63,8 +63,148 @@ public class Transaction
      {
  
      }
@@ -1097,6 +1150,8 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..31b058210fa74e265ca6ac687e83cf9f
 +            Category = LanguageStrings.Translate("content.item.type." + item.ItemType, item.ItemType.ToString()),
 +            Description = item.DisplayDescription, Group = group, Quantity = count, Price = price,
 +            Detail = snapshot.NativeTradeOnly ? detail + " · Execute no menu original (F10)." : detail,
++            DiagnosticReason = binding != null ? null : snapshot.NativeTradeOnly ? "NPC exige executor nativo" :
++                double.IsNaN(price) ? "preço/fluxo especializado" : "sem autorização, quantidade ou executor genérico",
 +            TradeBinding = binding });
 +    }
 +
@@ -1107,7 +1162,7 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..31b058210fa74e265ca6ac687e83cf9f
          SetupLists();
          if (Store == null)
          {
-@@ -317,6 +455,17 @@ public class Transaction
+@@ -317,6 +457,17 @@ public class Transaction
      }
      public void Update()
      {
@@ -1125,7 +1180,7 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..31b058210fa74e265ca6ac687e83cf9f
          if (MenuPool.IsAnyMenuOpen())
          {
              if (RotatePreview)
-@@ -339,6 +488,7 @@ public class Transaction
+@@ -339,6 +490,7 @@ public class Transaction
      }
      public void DisposeTransactionMenu()
      {
@@ -1428,7 +1483,7 @@ index b3d345d2104b76142a24b51de9831e8c17672a3a..8cc785caea17d3202b8a5a927f60a1d9
  }
  
 diff --git a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs b/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs
-index 54b02a3921fdb496fc53e4af41312ac6a784d07e..9f39850ab3e9257a1657d6248e469ac7d35390b8 100644
+index 54b02a3921fdb496fc53e4af41312ac6a784d07e..86aec7d94095c73b45f476941e095e0e7683555d 100644
 --- a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs	
 +++ b/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs	
 @@ -17,6 +17,9 @@ public class VehicleInteractionMenu
@@ -1480,7 +1535,7 @@ index 54b02a3921fdb496fc53e4af41312ac6a784d07e..9f39850ab3e9257a1657d6248e469ac7
 +
 +    private void ReadElectroInventoryStorage(ElectroInventory.Wire.Snapshot snapshot) =>
 +        LosSantosRED.lsr.ElectroInventoryPublisher.Storage(snapshot, VehicleExt.GetCarName(),
-+            VehicleExt.SimpleInventory, VehicleExt.WeaponStorage, VehicleExt.CashStorage, null, null, electroInventoryWithAnimations);
++            VehicleExt.SimpleInventory, VehicleExt.WeaponStorage, VehicleExt.CashStorage, null, null, electroInventoryWithAnimations, true);
 +
      protected virtual void ProcessMenu()
      {

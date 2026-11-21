@@ -55,7 +55,7 @@ namespace ElectroInventory
             {
                 case ActionKind.Use: return "Usar / ativar";
                 case ActionKind.Discard: return "Descartar";
-                case ActionKind.Deposit: return "Depositar";
+                case ActionKind.Deposit: return "Guardar";
                 case ActionKind.Take: return "Retirar";
                 case ActionKind.Buy: return "Comprar";
                 case ActionKind.Sell: return "Vender";
