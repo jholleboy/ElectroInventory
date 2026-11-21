@@ -230,8 +230,11 @@ namespace ElectroInventory
                     {
                         if (Pressed(Keys.F7, edges)) { nav.Selected = Math.Max(0, nav.Selected - InventoryView.Page); refresh = true; }
                         if (Pressed(Keys.F8, edges)) { nav.Selected += InventoryView.Page; refresh = true; }
-                        if (Pressed(Keys.F6, edges) && sample.Mode == 1) { nav.Right = !nav.Right; nav.Selected = 0; refresh = true; }
+                        
                     }
+                    bool switchSide = Pressed(Keys.F6, edges);
+                    if (sample.Mode == 1 && switchSide && Game.IsKeyDownRightNow(Keys.LControlKey))
+                    { nav.SwitchSide(); refresh = true; }
                     bool switchTab = Pressed(Keys.F2, edges);
                     if (sample.Mode == 2 && switchTab && Game.IsKeyDownRightNow(Keys.LControlKey)
                         && nav.Trade.Toggle(sample))

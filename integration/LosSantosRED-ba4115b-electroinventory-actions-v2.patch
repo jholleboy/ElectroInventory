@@ -402,7 +402,7 @@ index 0000000000000000000000000000000000000000..840981c46fecb61af1c6df5970601517
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..be5ee1f1e85207f529133dc57c4078bbb9c12122
+index 0000000000000000000000000000000000000000..733e1fb5a74a3b861fd05e053a40b6f42abe6e36
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
 @@ -0,0 +1,302 @@
@@ -594,7 +594,7 @@ index 0000000000000000000000000000000000000000..be5ee1f1e85207f529133dc57c4078bb
 +                }
 +            if (cash != null && snapshot.Rows.Count < Protocol.MaxRows)
 +                snapshot.Rows.Add(new Entry { Id = "cash", Name = "Dinheiro em espécie", Category = "Dinheiro",
-+                    Quantity = cash.StoredCash, Group = 3 });
++                    Quantity = cash.StoredCash, Group = 3, Detail = "Limite configurado: $ " + cash.ElectroInventoryCashLimit });
 +        }
 +
 +        private static void CopyItems(Snapshot snapshot, List<InventoryItem> items, byte group,
@@ -781,10 +781,18 @@ index 020d96832cdda2e97ca2a4e971d292bb22ef0454..4c91f9749153a37d952294b9608c3561
                  new ModTaskGroup("RG3:World Gen", new List<ModTask>()//something in here is causing a hang on some crapola computers
                  {
 diff --git a/Los Santos RED/lsr/Inventory/CashStorage.cs b/Los Santos RED/lsr/Inventory/CashStorage.cs
-index 929e8f36477b97664f5e63a430ddca1e9a507717..8bda39511cbce7044563a03ec74a6fdbd66d662e 100644
+index 929e8f36477b97664f5e63a430ddca1e9a507717..f644fd0a655acf3683212ad02df9df1bc75f2d7c 100644
 --- a/Los Santos RED/lsr/Inventory/CashStorage.cs	
 +++ b/Los Santos RED/lsr/Inventory/CashStorage.cs	
-@@ -35,12 +35,15 @@ public class CashStorage
+@@ -19,6 +19,7 @@ public class CashStorage
+     private UIMenuNumericScrollerItem<int> storeCashScroller;
+     private UIMenuNumericScrollerItem<int> removeCashScroller;
+     private int MaxAccountValue = 500000000;
++    internal int ElectroInventoryCashLimit => MaxAccountValue;
+     private GameLocation GameLocation;
+     private uint NotificationHandle;
+     private UIMenuItem cashStorageSubMenuItem;
+@@ -35,12 +36,15 @@ public class CashStorage
          StoredCash = 0;
      }
  

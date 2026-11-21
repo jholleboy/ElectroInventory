@@ -11,10 +11,23 @@ namespace ElectroInventory
         public string Query = "", Category = "";
         public bool Search;
         public int Selected, Offset, CategoryOffset;
+        private int otherSelected;
         public bool Right;
         public readonly TradeTabs Trade = new TradeTabs();
-        public void Reset() { Query = Category = ""; Search = Right = false; Selected = Offset = CategoryOffset = 0; }
-        public void Filter(string category) { Category = category; Selected = Offset = 0; }
+        public void Reset() { Query = Category = ""; Search = Right = false; Selected = Offset = CategoryOffset = otherSelected = 0; }
+        public void Filter(string category) { Category = category; Selected = Offset = otherSelected = 0; }
+        public int Selection(bool right) => right == Right ? Selected : otherSelected;
+        public void Select(bool right, int index)
+        {
+            if (Right != right)
+            {
+                otherSelected = Selected;
+                Right = right;
+            }
+            Selected = index;
+            Search = false;
+        }
+        public void SwitchSide() => Select(!Right, otherSelected);
     }
 
     internal sealed class InventoryView
@@ -132,7 +145,8 @@ namespace ElectroInventory
         {
             Box(g, bounds, Color.FromArgb(13, 26, 39), Edge);
             Text(g, title, bounds.X + 12, bounds.Y + 9, bounds.Width - 22, 26, 19, Ink, true);
-            int offset = right == nav.Right ? nav.Offset : 0;
+            int indexForSide = Math.Max(0, Math.Min(rows.Count - 1, nav.Selection(right)));
+            int offset = (indexForSide / Page) * Page;
             if (rows.Count == 0) Text(g, "Nenhum item nesta seleção.", bounds.X + 12, bounds.Y + 56, bounds.Width - 24, 32, 18, Muted, false);
             int width = (bounds.Width - 28) / columns;
             for (int i = 0; i < Page && offset + i < rows.Count; i++)
@@ -152,10 +166,14 @@ namespace ElectroInventory
                 }
                 Text(g, row.Name, card.X + 7, card.Y + 35, card.Width - 14, 27, 16, Ink, true);
                 Text(g, row.Group >= 4 ? Summary(row) : row.Category, card.X + 7, card.Bottom - 22, card.Width - 14, 20, 14, selected ? Ink : Muted, false);
-                if (!passive) Targets.Add(card, () => { nav.Right = right; nav.Selected = index; nav.Search = false; });
+                if (!passive) Targets.Add(card, () => { nav.Select(right, index); });
             }
             Text(g, rows.Count == 0 ? "0 entradas" : $"{offset + 1}–{Math.Min(rows.Count, offset + Page)} / {rows.Count}",
-                bounds.X + 12, bounds.Bottom - 32, bounds.Width - 24, 23, 15, Muted, false);
+                bounds.X + 12, bounds.Bottom - 32, bounds.Width - 122, 23, 15, Muted, false);
+            if (!passive && offset > 0)
+                Button(g, new Rectangle(bounds.Right - 96, bounds.Bottom - 35, 39, 27), "‹", () => nav.Select(right, offset - Page));
+            if (!passive && offset + Page < rows.Count)
+                Button(g, new Rectangle(bounds.Right - 50, bounds.Bottom - 35, 39, 27), "›", () => nav.Select(right, offset + Page));
         }
 
         private void DrawDetail(Graphics g, Entry row)
