@@ -106,8 +106,9 @@ namespace ElectroInventory
                 }
                 else Grid(g, active, nav, false, new Rectangle(26, 230, 912, 458),
                     snapshot.Mode == 2 ? (nav.Trade.Current == TradeTabs.Buy ? "Ofertas da sessão" : "Itens elegíveis do inventário") : "Itens pessoais", 3, passive);
-                DrawDetail(g, count == 0 ? null : active[nav.Selected]);
-                DrawActions(g, action, result, busy, passive, snapshot.Mode == 2);
+                var row = count == 0 ? null : active[nav.Selected];
+                DrawDetail(g, row);
+                DrawActions(g, action, result, busy, passive, snapshot.Mode == 2, row);
                 Line(g, 25, 704, Width - 25, 704, Edge);
                 Text(g, snapshot.Mode == 2
                     ? "F10 fecha  ·  Clique ou Ctrl+F2 Comprar/Vender  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela"
@@ -188,12 +189,17 @@ namespace ElectroInventory
             Box(g, new Rectangle(971, 276, 378, 47), Card, Edge);
             DrawIcon(g, row, new Rectangle(1137, 279, 44, 40), Pink);
             Text(g, row.Name, 971, 329, 370, 53, 24, Ink, true);
-            Text(g, row.Category + "  ·  " + Summary(row), 971, 381, 370, 35, 17, Cyan, false);
+            string meta = row.Group >= 4
+                ? (double.IsNaN(row.Price) ? "Preço não informado" : "Preço da oferta  $ " + Quantity(row.Price))
+                    + "  ·  " + (double.IsNaN(row.Quantity) ? "Disponibilidade não informada" :
+                        (row.Group == TradeTabs.Buy ? "Estoque: " : "Elegíveis: ") + Quantity(row.Quantity))
+                : row.Category + "  ·  " + Summary(row);
+            Text(g, meta, 971, 381, 370, 41, 17, Cyan, false);
             Text(g, row.Description, 971, 424, 370, 83, 19, Ink, false);
             Text(g, row.Detail, 971, 510, 370, 48, 16, Muted, false);
         }
 
-        private void DrawActions(Graphics g, ActionSelection action, ActionResult result, bool busy, bool passive, bool trade)
+        private void DrawActions(Graphics g, ActionSelection action, ActionResult result, bool busy, bool passive, bool trade, Entry row)
         {
             string status = busy ? "Aguardando o LS RED…" : result == ActionResult.Started ? "Atividade iniciada no LS RED." :
                 result == ActionResult.Success ? "Operação concluída." : result == ActionResult.Expired ? "Contexto alterado. Selecione novamente." :
@@ -206,6 +212,13 @@ namespace ElectroInventory
                 return;
             }
             string label = ActionSelection.Label(action.Kind);
+            if (trade && row != null)
+            {
+                decimal? total = TradeTabs.Total(row, action.Offer, action.Quantity);
+                if (total.HasValue)
+                    Text(g, "Total da seleção  $ " + total.Value.ToString("N2", Portuguese),
+                        970, 565, 380, 27, 17, Cyan, true);
+            }
             if (passive)
             {
                 Text(g, (action.Confirming ? "Confirmar: " : "") + label + "  × " + action.Quantity,
@@ -254,7 +267,8 @@ namespace ElectroInventory
         }
         private static readonly System.Text.RegularExpressions.Regex GtaTags =
             new System.Text.RegularExpressions.Regex(@"~[a-zA-Z0-9_]+~");
-        private static string Quantity(double value) => value.ToString("0.####", System.Globalization.CultureInfo.GetCultureInfo("pt-BR"));
+        private static readonly System.Globalization.CultureInfo Portuguese = System.Globalization.CultureInfo.GetCultureInfo("pt-BR");
+        private static string Quantity(double value) => value.ToString("0.####", Portuguese);
         private static string Summary(Entry row)
         {
             if (row.Group >= 4)

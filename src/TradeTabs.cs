@@ -32,6 +32,13 @@ namespace ElectroInventory
                 row.Price >= 0 && offer != null && (offer.Kinds & kind) != 0 && offer.Maximum > 0;
         }
 
+        public static decimal? Total(Entry row, ActionOffer offer, int quantity)
+        {
+            if (!CanAct(row, offer) || quantity <= 0 || quantity > offer.Maximum || row.Price > int.MaxValue)
+                return null;
+            return (decimal)row.Price * quantity;
+        }
+
         public static int RestoreSelection(List<Entry> previous, int index, List<Entry> updated)
         {
             if (index < 0 || index >= previous.Count) return 0;

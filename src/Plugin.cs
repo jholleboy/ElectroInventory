@@ -101,7 +101,7 @@ namespace ElectroInventory
                 bool refresh = now >= nextRead;
                 if (refresh)
                 {
-                    nextRead = now + Stopwatch.Frequency / 10;
+                    nextRead = now + Stopwatch.Frequency / (actions?.Busy == true ? 30 : 10);
                     Snapshot next = source.Read() ?? unavailable.Read();
                     if (!ReferenceEquals(next, sample))
                     {
@@ -118,6 +118,8 @@ namespace ElectroInventory
                     var resultNow = actions?.Result ?? ActionResult.None;
                     refresh |= revisionNow != lastRevision || resultNow != lastResult;
                     lastRevision = revisionNow;
+                    if (lastResult != resultNow && resultNow == ActionResult.Success)
+                        nextRead = 0;
                     lastResult = resultNow;
                 }
                 bool togglePressed = Pressed(toggle, edges);
@@ -230,7 +232,6 @@ namespace ElectroInventory
                     {
                         if (Pressed(Keys.F7, edges)) { nav.Selected = Math.Max(0, nav.Selected - InventoryView.Page); refresh = true; }
                         if (Pressed(Keys.F8, edges)) { nav.Selected += InventoryView.Page; refresh = true; }
-                        
                     }
                     bool switchSide = Pressed(Keys.F6, edges);
                     if (sample.Mode == 1 && switchSide && Game.IsKeyDownRightNow(Keys.LControlKey))
