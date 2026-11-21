@@ -82,6 +82,7 @@ namespace ElectroInventory
             var edges = new HashSet<Keys>();
             var pauseGuard = new PauseGuard();
             var pointer = new PointerCapture();
+            var secondary = new PointerCapture();
             bool ownsInput = false;
             Guid releaseSession = Guid.Empty;
             LoadCursor();
@@ -150,6 +151,12 @@ namespace ElectroInventory
                     Game.DisplayHelp("Esta negociação usa o menu original do Los Santos RED.");
                     inspectPressed = false;
                 }
+                if (open && ownsInput && escape && layout.ContextOpen)
+                {
+                    layout.ContextOpen = false;
+                    escape = false;
+                    refresh = true;
+                }
                 if (open && ownsInput && escape && selection.Confirming)
                 {
                     selection.Confirming = false;
@@ -173,6 +180,7 @@ namespace ElectroInventory
                     selection.Bind(Guid.Empty, null);
                     layout.CloseRequested = false;
                     layout.ActionRequested = false;
+                    layout.ContextOpen = false;
                     refresh = true;
                     if (!passive) BlockPause();
                 }
@@ -210,6 +218,7 @@ namespace ElectroInventory
                 if (!ownsInput)
                 {
                     pointer.Click(false, false);
+                    secondary.Click(false, false);
                     lock (RenderLock) cursorPosition = null;
                 }
                 if (ownsInput != previousInput)
@@ -219,6 +228,7 @@ namespace ElectroInventory
                     layout.Targets.Clear();
                     layout.ActionRequested = false;
                     selection.Confirming = false;
+                    layout.ContextOpen = false;
                 }
                 if (open)
                 {
@@ -231,7 +241,7 @@ namespace ElectroInventory
                     RectangleF bounds = OverlayViewport.Fit(size, new Size(InventoryView.Width, InventoryView.Height));
                     if (ownsInput)
                     {
-                        if (nav.Search || !Game.IsKeyDownRightNow(Keys.LControlKey))
+                        if (!layout.ContextOpen && (nav.Search || !Game.IsKeyDownRightNow(Keys.LControlKey)))
                             refresh |= Navigate(nav, displayed, edges, toggle, togglePressed, escape);
                         // Frame-local controls expire automatically when the overlay closes.
                         foreach (int control in OverlayControls)
@@ -245,6 +255,7 @@ namespace ElectroInventory
                             }
                         NativeFunction.Natives.SET_MOUSE_CURSOR_THIS_FRAME();
                         bool click = NativeFunction.Natives.IS_DISABLED_CONTROL_PRESSED<bool>(0, 237);
+                        bool rightClick = NativeFunction.Natives.IS_DISABLED_CONTROL_PRESSED<bool>(0, 238);
                         float x = NativeFunction.Natives.GET_CONTROL_NORMAL<float>(0, 239) * size.Width;
                         float y = NativeFunction.Natives.GET_CONTROL_NORMAL<float>(0, 240) * size.Height;
                         bool overPanel = OverlayPointer.TryMap(x, y, bounds, new Size(InventoryView.Width, InventoryView.Height), out Point logical);
@@ -252,6 +263,11 @@ namespace ElectroInventory
                         if (pointer.Click(true, click) && overPanel && size == lastSize)
                         {
                             layout.Click(logical);
+                            refresh = true;
+                        }
+                        if (secondary.Click(true, rightClick) && overPanel && size == lastSize)
+                        {
+                            layout.RightClick(logical);
                             refresh = true;
                         }
 
@@ -291,7 +307,18 @@ namespace ElectroInventory
                         layout.ActionRequested = false;
                         refresh = true;
                     }
-                    if (!nav.Search && Game.IsKeyDownRightNow(Keys.LControlKey))
+                    if (ownsInput && !nav.Search && Pressed(Keys.Apps, edges))
+                    {
+                        layout.OpenContext();
+                        refresh = true;
+                    }
+                    if (layout.ContextOpen)
+                    {
+                        if (Pressed(Keys.Up, edges)) { layout.ContextStep(-1); refresh = true; }
+                        if (Pressed(Keys.Down, edges)) { layout.ContextStep(1); refresh = true; }
+                        if (Pressed(Keys.Enter, edges)) { layout.ActivateContext(selection, actions?.Busy == true); refresh = true; }
+                    }
+                    if (!layout.ContextOpen && !nav.Search && Game.IsKeyDownRightNow(Keys.LControlKey))
                     {
                         if (Pressed(Keys.Up, edges)) { nav.Selected = Math.Max(0, nav.Selected - 1); refresh = true; }
                         if (Pressed(Keys.Down, edges)) { nav.Selected++; refresh = true; }

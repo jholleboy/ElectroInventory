@@ -48,6 +48,31 @@ namespace ElectroInventory
         private readonly ItemArtwork artwork;
         public InventoryView(ItemArtwork artwork) { this.artwork = artwork; }
         public readonly HitTargets Targets = new HitTargets();
+        private readonly HitTargets secondaryTargets = new HitTargets();
+        public bool ContextOpen;
+        public int ContextIndex;
+        private ActionKind[] contextActions = new ActionKind[0];
+
+        public void RightClick(Point point)
+        {
+            if (secondaryTargets.Click(point)) OpenContext();
+        }
+
+        public void OpenContext()
+        {
+            ContextOpen = true;
+            ContextIndex = 0;
+        }
+
+        public void ContextStep(int delta) =>
+            ContextIndex = Math.Max(0, Math.Min(contextActions.Length, ContextIndex + delta));
+
+        public void ActivateContext(ActionSelection action, bool busy)
+        {
+            if (ContextIndex < contextActions.Length && !busy && action.Choose(contextActions[ContextIndex]))
+                action.Confirming = true;
+            ContextOpen = false;
+        }
 
         public static List<Entry> Items(Snapshot snapshot, Navigation nav, bool right)
         {
@@ -75,6 +100,7 @@ namespace ElectroInventory
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 Targets.Clear();
+                secondaryTargets.Clear();
                 bool passive = !ownsInput;
                 Box(g, new Rectangle(0, 0, Width, Height), Color.FromArgb(9, 19, 31), Cyan);
                 Line(g, 25, 72, Width - 25, 72, Edge);
@@ -140,11 +166,31 @@ namespace ElectroInventory
                 Text(g, snapshot.Mode == 2
                     ? "F10 fecha  ·  Clique ou Ctrl+F2 Comprar/Vender  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela"
                     : passive ? "F10 fecha  ·  Ctrl+F6 troca lado  ·  Ctrl+setas navega/ajusta  ·  Ctrl+F4 ação  ·  Ctrl+F3 confirma  ·  Ctrl+F5 cancela" :
-                    "Setas/mouse  Navegar  ·  PgUp/PgDn/roda  Página  ·  /  Pesquisar  ·  Home/End  Filtro  ·  Ctrl+F4  Ação  ·  Ctrl+F3  Confirmar  ·  I/Esc  Fechar",
+                    "Setas/mouse  Navegar  ·  PgUp/PgDn/roda  Página  ·  /  Pesquisar  ·  Home/End  Filtro  ·  Ctrl+F4  Ação  ·  Ctrl+F3  Confirmar  ·  Tecla Menu  Ações  ·  I/Esc  Fechar",
                     28, 718, 1150, 27, 16, Muted, false);
                 if (snapshot.Incomplete) Text(g, "Lista parcial", 1230, 718, 145, 27, 16, Pink, true);
+                if (ContextOpen && ownsInput && row != null) DrawContext(g, action, busy);
+                else ContextOpen = false;
             }
             return image;
+        }
+
+        private void DrawContext(Graphics g, ActionSelection action, bool busy)
+        {
+            contextActions = busy ? new ActionKind[0] : action.AuthorizedKinds();
+            ContextIndex = Math.Min(ContextIndex, contextActions.Length);
+            Targets.Clear();
+            secondaryTargets.Clear();
+            var panel = new Rectangle(958, 269, 402, 66 + (contextActions.Length + 1) * 42);
+            Box(g, panel, Color.FromArgb(11, 29, 43), Cyan);
+            Text(g, "AÇÕES DO ITEM  ·  Esc volta", 976, 282, 360, 31, 18, Cyan, true);
+            for (int i = 0; i <= contextActions.Length; i++)
+            {
+                int index = i;
+                string label = i == contextActions.Length ? "Informações" : ActionSelection.Label(contextActions[i]);
+                Button(g, new Rectangle(975, 320 + i * 42, 365, 37), label,
+                    () => { ContextIndex = index; ActivateContext(action, busy); }, i == ContextIndex);
+            }
         }
 
         private void DrawTradeTabs(Graphics g, Snapshot snapshot, Navigation nav, bool ownsInput)
@@ -194,7 +240,12 @@ namespace ElectroInventory
                 }
                 Text(g, row.Name, card.X + 7, card.Y + 35, card.Width - 14, 27, 16, Ink, true);
                 Text(g, nav.Equipment && row.Group == 1 ? "EQUIPADA" : row.Group >= 4 ? Summary(row) : row.Category, card.X + 7, card.Bottom - 22, card.Width - 14, 20, 14, selected ? Ink : Muted, false);
-                if (!passive) Targets.Add(card, () => { nav.Select(right, index); });
+                if (!passive)
+                {
+                    Action select = () => nav.Select(right, index);
+                    Targets.Add(card, select);
+                    secondaryTargets.Add(card, select);
+                }
             }
             Text(g, rows.Count == 0 ? "0 entradas" : $"{offset + 1}–{Math.Min(rows.Count, offset + Page)} / {rows.Count}",
                 bounds.X + 12, bounds.Bottom - 32, bounds.Width - 122, 23, 15, Muted, false);

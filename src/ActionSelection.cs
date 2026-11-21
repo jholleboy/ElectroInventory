@@ -24,6 +24,18 @@ namespace ElectroInventory
             NextKind();
         }
 
+        public ActionKind[] AuthorizedKinds() => Offer == null || Offer.Token == Guid.Empty || Offer.Maximum <= 0
+            ? new ActionKind[0] : Array.FindAll(Order, candidate => (Offer.Kinds & candidate) != 0);
+
+        public bool Choose(ActionKind kind)
+        {
+            if (Array.IndexOf(AuthorizedKinds(), kind) < 0) return false;
+            Kind = kind;
+            Quantity = 1;
+            Confirming = false;
+            return true;
+        }
+
         public void NextKind()
         {
             if (Offer == null) return;
