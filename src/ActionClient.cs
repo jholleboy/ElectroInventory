@@ -18,11 +18,14 @@ namespace ElectroInventory
         private Guid pending;
         public Guid Revision { get; private set; }
         public ActionOffer[] Offers { get; private set; } = new ActionOffer[0];
-        private long nativeTradeStamp;
+        private Guid nativeTradeSession;
+        public Guid TradeOpen { get; private set; }
+        public byte TradeDirection { get; private set; }
+        public int TradeBalance { get; private set; }
         private byte[] equipmentBytes;
         public long EquipmentStamp { get; private set; }
         public Snapshot Equipment { get; private set; }
-        public bool NativeTradeOnly(long stamp) => stamp > 0 && nativeTradeStamp == stamp;
+        public bool NativeTradeOnly(Guid session) => session != Guid.Empty && nativeTradeSession == session;
         public bool Busy => pending != Guid.Empty;
         public ActionResult Result { get; private set; }
 
@@ -61,6 +64,8 @@ namespace ElectroInventory
                     {
                         Revision = Guid.Empty;
                         Offers = new ActionOffer[0];
+                        TradeOpen = Guid.Empty;
+                        TradeBalance = 0;
                         return;
                     }
                     int equipmentLength = view.ReadInt32(ActionProtocol.EquipmentLength);
@@ -77,7 +82,11 @@ namespace ElectroInventory
                         }
                     }
                     else { Equipment = null; equipmentBytes = null; EquipmentStamp = 0; }
-                    nativeTradeStamp = view.ReadInt32(ActionProtocol.FocusPolicy) == 2 ? stamp : 0;
+                    nativeTradeSession = view.ReadInt32(ActionProtocol.FocusPolicy) == 2 ? session : Guid.Empty;
+                    int direction = view.ReadInt32(ActionProtocol.TradeTab);
+                    TradeDirection = direction == 4 || direction == 5 ? (byte)direction : (byte)0;
+                    TradeOpen = TradeDirection == 0 ? Guid.Empty : ActionProtocol.ReadGuid(view, ActionProtocol.TradeOpenId);
+                    TradeBalance = view.ReadInt32(ActionProtocol.TradeBalance);
                     Guid revision = ActionProtocol.ReadGuid(view, 16);
                     if (revision == Revision) return;
                     int count = view.ReadInt32(32);
@@ -159,7 +168,9 @@ namespace ElectroInventory
             view = null; map = null; mutex = null;
             Revision = pending = Guid.Empty;
             Offers = new ActionOffer[0];
-            nativeTradeStamp = 0;
+            nativeTradeSession = Guid.Empty;
+            TradeOpen = Guid.Empty;
+            TradeBalance = 0;
             EquipmentStamp = 0;
             Equipment = null;
             equipmentBytes = null;

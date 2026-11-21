@@ -83,3 +83,10 @@ Os testes de console cobrem o novo payload com arma equipada, arma carregada sem
 2. Em veículo/imóvel, compare armas, munição, saldo e teto com o menu original. Use a saída explícita e verifique Guardar/Retirar, depósito e retirada pelas opções nativas. O overlay não emite essas operações especializadas.
 3. Em itens comuns, use clique direito e a tecla Menu. Confirme que Informações não executa ação e que ações autorizadas exigem confirmação. Mude de sessão durante o menu, faça clique duplo e feche com Esc ou F10. Repita com NPC, comércio e ElectroHud V6.
 4. Guarde e retire unidades inteiras de uma pilha com resíduo. Interrompa a animação de veículo depois da confirmação e compare as duas pontas. Confira proteção de contexto e foco ao descarregar o plugin e ao retornar ao menu original.
+
+## Regressão no GTA Legacy: Bite! e NPCs
+
+1. Abra Bite! e acione F10. Confira que a interface de refeições nativa mantém foco, inclusive para os combos de $8, $7 e $6. Faça uma compra em um save de teste e compare pagamento, efeitos de consumo, avanço de tempo e encerramento com a RC2 original.
+2. Compare dinheiro em espécie e contas do personagem com a origem exibida pela ponte em um comércio comum e em um NPC que usa apenas espécie. Confira o saldo com dinheiro realmente insuficiente.
+3. Negocie com Mackenzie Warren ou outro NPC com catálogo genérico. Abra Comprar/Vender, compare a aba inicial e confirme as duas direções. Confira animações, foco, alteração de saldo/estoque, retorno ao menu, afastamento antes da confirmação, pausa, NPC sem dinheiro, duplo clique e fechamento durante a fila.
+4. Confira o fallback de arma, veículo, refeição e serviço. Os testes automatizados exercitam as regras de cotação, fundos, estoque e invalidação; não reproduzem animações ou assinaturas do SDK oficial.

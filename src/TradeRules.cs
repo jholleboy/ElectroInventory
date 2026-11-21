@@ -14,6 +14,14 @@ namespace ElectroInventory.Wire
             return demand < 0 ? owned : (int)Math.Max(0, Math.Min(owned, (long)demand - bought));
         }
 
+        public static bool NpcCanSettle(bool buy, int npcCash, int price, int amount, float listedStock, bool finite)
+        {
+            if (npcCash < 0 || amount <= 0 || price < 0) return false;
+            long total = (long)price * amount;
+            if (!buy) return total <= npcCash;
+            return total <= int.MaxValue - (long)npcCash && (!finite || listedStock >= amount);
+        }
+
         public static bool QuoteAllows(bool permitted, int quotedPrice, int currentPrice,
             int quantity, int maximum, int balance, bool buy) =>
             permitted && quotedPrice == currentPrice && quantity <= maximum &&

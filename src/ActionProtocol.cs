@@ -29,6 +29,7 @@ namespace ElectroInventory.Wire
     {
         public const int Magic = 0x45494132, Capacity = 65536, Offers = 160, OfferSize = 24;
         public const int FocusRequest = 49000, FocusGrant = 49024, DiagnosticsFlag = 49048, FocusPolicy = 49052;
+        public const int TradeTab = 49056, TradeBalance = 49060, TradeOpenId = 49064;
         public const int EquipmentStamp = 49100, EquipmentLength = 49108, EquipmentPayload = 49112;
         public const int EquipmentCapacity = Capacity - EquipmentPayload;
         public static Snapshot ReadEquipment(byte[] payload, Guid session, int character)
@@ -93,8 +94,8 @@ namespace ElectroInventory.Wire
                 float.IsNaN(to) || float.IsInfinity(to) || to < 0 || from < quantity)
                 return false;
             // Reject amounts where float arithmetic would lose a fractional residue.
-            return (double)(from - quantity) == (double)from - quantity &&
-                (double)(to + quantity) == (double)to + quantity;
+            return (double)from - (from - quantity) == quantity &&
+                (double)(to + quantity) - to == quantity;
         }
 
         public static bool ValidPrice(int unit, int quantity, int balance, bool buy)

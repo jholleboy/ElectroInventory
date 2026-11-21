@@ -13,6 +13,7 @@ internal static class Program
 
     private static void Main()
     {
+        CheckNativeCommerce();
         CheckOverlayInput();
         CheckV4();
         CheckV31();
@@ -321,6 +322,33 @@ internal static class Program
         Require(ActionProtocol.ExactTransfer(2.5f, .25f, 1));
         Require(!ActionProtocol.ExactTransfer(.5f, .25f, 1));
         Console.WriteLine("V4: proteção, armas, munição, extensão inválida, contexto e ações restritas passaram.");
+    }
+
+    private static void CheckNativeCommerce()
+    {
+        Require(TradeRules.NpcCanSettle(true, 12, 3, 2, 2, true));
+        Require(!TradeRules.NpcCanSettle(true, 12, 3, 2, 1, true));
+        Require(TradeRules.NpcCanSettle(false, 12, 3, 4, 0, false));
+        Require(!TradeRules.NpcCanSettle(false, 12, 3, 5, 0, false));
+        Require(!TradeRules.QuoteAllows(true, 8, 8, 1, 1, 0, true));
+        Require(!ActionProtocol.ExactTransfer(1, float.MaxValue, 1)); // no safe inventory credit
+        Guid session = Guid.NewGuid(), revision = Guid.NewGuid();
+        var offer = new ActionOffer { Token = Guid.NewGuid(), Kinds = ActionKind.Buy, Maximum = 2 };
+        var command = new ActionCommand { Session = session, Revision = revision, Token = offer.Token,
+            Id = Guid.NewGuid(), Kind = ActionKind.Buy, Quantity = 1 };
+        Require(ActionProtocol.Authorize(command, session, revision, offer));
+        Require(!ActionProtocol.Authorize(command, Guid.Empty, revision, offer)); // distance/closed conversation
+        Require(!ActionProtocol.Authorize(command, session, Guid.NewGuid(), offer)); // accepted already
+        var meal = new Entry { Group = 4, Price = 8 };
+        Require(!ElectroInventory.TradeTabs.CanAct(meal, null)); // ConsumeOnPurchase is native-only
+        int stock = 2;
+        for (int spent = 0; spent < 2; spent++)
+        {
+            Require(TradeRules.BuyLimit(4, 2, spent) == stock);
+            stock--;
+        }
+        Require(TradeRules.BuyLimit(4, 2, 2) == 0);
+        Console.WriteLine("Comércio nativo: refeições sem token, fundos do NPC, estoque, sessão e repetição passaram.");
     }
 
     private static void CheckOverlayInput()

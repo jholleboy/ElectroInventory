@@ -95,7 +95,7 @@ namespace ElectroInventory
             return categories;
         }
 
-        public Bitmap Make(Snapshot snapshot, Navigation nav, bool demo, bool ownsInput, ActionSelection action, ActionResult result, bool busy, bool gearAvailable)
+        public Bitmap Make(Snapshot snapshot, Navigation nav, bool demo, bool ownsInput, ActionSelection action, ActionResult result, bool busy, bool gearAvailable, int balanceSource)
         {
             var image = new Bitmap(Width, Height);
             using (var g = Graphics.FromImage(image))
@@ -125,7 +125,7 @@ namespace ElectroInventory
                     Button(g, new Rectangle(1110, 150, 260, 30), nav.Quick ? "Mostrar todos os itens" : "Acesso rápido · Itens utilizáveis",
                         () => { nav.Quick = !nav.Quick; nav.Filter(""); }, nav.Quick);
                 if (!double.IsNaN(snapshot.Balance))
-                    Text(g, "Saldo aplicável  $ " + Quantity(snapshot.Balance), 1004, 149, 355, 30, 19, Cyan, true);
+                    Text(g, (balanceSource == 1 ? "Em espécie" : balanceSource == 2 ? "Espécie + contas" : "Saldo aplicável") + "  $ " + Quantity(snapshot.Balance), 1004, 149, 355, 30, 19, Cyan, true);
 
                 if (snapshot.Mode == 2) DrawTradeTabs(g, snapshot, nav, ownsInput);
                 var categories = Categories(snapshot, nav);
@@ -295,8 +295,8 @@ namespace ElectroInventory
             Text(g, status, 970, 655, 380, 26, 15, Muted, false);
             if (action.Kind == ActionKind.None || busy)
             {
-                if (!busy && mode == 1 && row != null && !passive)
-                    Button(g, new Rectangle(970, 601, 280, 39), "Voltar ao menu de armazenamento", () => CloseRequested = true);
+                if (!busy && (mode == 1 || mode == 2) && row != null && !passive)
+                    Button(g, new Rectangle(970, 601, 280, 39), mode == 2 ? "Usar menu original do LS RED" : "Voltar ao menu de armazenamento", () => CloseRequested = true);
                 else if (!busy)
                     Text(g, trade ? "Preço informativo. Ação indisponível neste contexto." : "Ação indisponível nesta seleção.",
                         970, 603, 380, 42, 16, Muted, false);

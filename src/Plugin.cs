@@ -91,7 +91,7 @@ namespace ElectroInventory
             if (inspect == toggle) log("Inspeção desativada: InspectKey e ToggleKey são iguais.");
             bool open = false, passive = false, conflictLogged = false;
             Snapshot sample = null;
-            Guid session = Guid.Empty;
+            Guid session = Guid.Empty, handledTradeOpen = Guid.Empty;
             long nextRead = 0;
             int revision = 0;
             Size lastSize = Size.Empty;
@@ -152,12 +152,15 @@ namespace ElectroInventory
                     open = false;
                     ReleaseTexture();
                 }
-                bool nativeTrade = sample?.Mode == 2 && actions?.NativeTradeOnly(sample.PublicationStamp) == true;
-                if (nativeTrade && (open || inspectPressed))
+                bool nativeTrade = sample?.Mode == 2 && actions?.NativeTradeOnly(sample.Session) == true;
+                var requestedTrade = sample?.Mode == 2 ? actions?.TradeOpen ?? Guid.Empty : Guid.Empty;
+                bool autoTrade = available && requestedTrade != Guid.Empty && requestedTrade != handledTradeOpen;
+                if (autoTrade) handledTradeOpen = requestedTrade;
+                if (nativeTrade && (open || inspectPressed || autoTrade))
                 {
                     if (open) { open = false; ReleaseTexture(); }
                     Game.DisplayHelp("Esta negociação usa o menu original do Los Santos RED.");
-                    inspectPressed = false;
+                    inspectPressed = autoTrade = false;
                 }
                 if (open && ownsInput && escape && layout.ContextOpen)
                 {
@@ -178,13 +181,17 @@ namespace ElectroInventory
                     ReleaseTexture();
                 }
                 else if (!open && available && sample != null &&
-                    ((togglePressed && ped.IsVisible && sample.Mode == 0 && !sample.BlocksInput && !escapeDown) || (inspectPressed && sample.Mode != 0)))
+                    ((togglePressed && ped.IsVisible && sample.Mode == 0 && !sample.BlocksInput && !escapeDown) || ((inspectPressed || autoTrade) && sample.Mode != 0)))
                 {
                     open = true;
                     passive = sample.Mode != 0;
                     session = sample.Session;
                     nav.Reset();
-                    if (sample.Mode == 2) nav.Trade.Open(sample);
+                    if (sample.Mode == 2)
+                    {
+                        nav.Trade.Open(sample);
+                        if (autoTrade) nav.Trade.Select(sample, actions.TradeDirection);
+                    }
                     selection.Bind(Guid.Empty, null);
                     layout.CloseRequested = false;
                     layout.ActionRequested = false;
@@ -358,7 +365,7 @@ namespace ElectroInventory
                     if (size != lastSize || refresh)
                     {
                         string path = Path.Combine(temp, "page-" + revision++ + ".png");
-                        using (var bitmap = layout.Make(displayed, nav, demo, ownsInput, selection, actions?.Result ?? ActionResult.None, actions?.Busy == true, gear != null)) bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                        using (var bitmap = layout.Make(displayed, nav, demo, ownsInput, selection, actions?.Result ?? ActionResult.None, actions?.Busy == true, gear != null, actions?.TradeBalance ?? 0)) bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
                         var next = Game.CreateTextureFromFile(path);
                         if (next == null) throw new IOException("Textura da interface indisponível.");
                         try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
