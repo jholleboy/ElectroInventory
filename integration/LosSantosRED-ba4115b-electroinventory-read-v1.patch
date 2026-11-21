@@ -138,7 +138,7 @@ index 0000000000000000000000000000000000000000..2c6b17058802637768d54e7bf30555cb
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..52998ca20571a0c36cb70d8ac0bf559d23cc4e47
+index 0000000000000000000000000000000000000000..52e30e8f6d836dcdf68f5be267f63a4ac3df74a0
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
 @@ -0,0 +1,170 @@
@@ -233,7 +233,7 @@ index 0000000000000000000000000000000000000000..52998ca20571a0c36cb70d8ac0bf559d
 +                var player = controller.Player;
 +                var ped = player?.Character;
 +                if (!controller.IsRunning || ped == null || !ped.Exists()) return;
-+                int handle = (int)ped.Handle;
++                int handle = unchecked((int)(uint)ped.Handle);
 +                if (character != handle)
 +                {
 +                    if (character != 0) Clear(owner);

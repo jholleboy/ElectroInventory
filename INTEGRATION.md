@@ -42,6 +42,7 @@ O SDK do RPH oferece o evento RawFrameRender e texturas. Escolhemos GDI+ para ra
 ### Contrato de leitura 1
 
 Canal `Local\ElectroInventory.Lsr.read.v1.<PID>`; mutex de tentativa imediata `.Lock`; mapa de 1 MiB. Cabeçalho little-endian tem magic `0x45494E31` no offset 0, versão no 4, PID no 8, comprimento no 12, timestamp monotônico no 16. O produtor invalida o timestamp antes de gravar e confirma por último, sob o mutex. O consumidor abre a visão com direitos somente leitura. Rejeita versão/PID inesperados, dados incompletos, tamanho fora do limite e snapshots com mais de dois segundos. Timestamp zero encerra a sessão. Um GUID distingue sessões e o handle distingue a troca de personagem.
+O produtor e o consumidor convertem o `PoolHandle` do RPH para `uint` e reinterpretam seus 32 bits como `int` no campo existente. O bit mais alto é preservado e o protocolo continua na versão 1.
 
 Payload inclui GUID, handle, modo, bloqueio de entrada, indicador de lista parcial, saldo opcional, título e até 2.000 linhas. Cada linha tem grupo, quantidade e preço double, ID original e textos UTF-8 delimitados por comprimento. NaN significa valor indisponível. Texto é limitado por campo; a interface identifica lista parcial. Grupos 0/1 são itens do jogador/contêiner, 2 armas de depósito, 3 dinheiro de depósito, 4 compra e 5 venda. Não há mensagem, canal ou executor de ações. Os indicativos de consumível e posse informam propriedades existentes, sem representar autorização atual para executar a ação.
 

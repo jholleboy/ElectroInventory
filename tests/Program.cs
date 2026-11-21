@@ -15,6 +15,10 @@ internal static class Program
         var snapshot = new Snapshot { Session = Guid.NewGuid(), Character = 41, Title = "Inventário" };
         var empty = Protocol.Decode(Protocol.Encode(snapshot));
         Require(empty.Rows.Count == 0 && empty.Session == snapshot.Session);
+        const uint highBitHandle = 0x80000001u;
+        snapshot.Character = unchecked((int)highBitHandle);
+        Require(unchecked((uint)Protocol.Decode(Protocol.Encode(snapshot)).Character) == highBitHandle);
+        snapshot.Character = 41;
         snapshot.Rows.Add(new Entry { Id = "agua", Name = "Água mineral", Quantity = 1.25 });
         snapshot.Rows.Add(new Entry { Id = "agua", Name = "Água mineral", Quantity = .125, Group = 1,
             Description = new string('ã', 8000) + "🧪" });
