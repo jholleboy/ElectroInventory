@@ -146,6 +146,7 @@ namespace ElectroInventory
                     nav.Reset();
                     selection.Bind(Guid.Empty, null);
                     layout.CloseRequested = false;
+                    layout.ActionRequested = false;
                     refresh = true;
                     if (!passive) BlockPause();
                 }
@@ -193,6 +194,7 @@ namespace ElectroInventory
                         if (Pressed(Keys.F8, edges)) { nav.Selected += InventoryView.Page; refresh = true; }
                         if (Pressed(Keys.F6, edges) && sample.Mode == 1) { nav.Right = !nav.Right; nav.Selected = 0; refresh = true; }
                     }
+                    // The selected object is mapped back to its original snapshot row, not its filtered index.
                     var items = InventoryView.Items(sample, nav, nav.Right);
                     int row = items.Count == 0 ? -1 : sample.Rows.IndexOf(items[Math.Min(items.Count - 1, Math.Max(0, nav.Selected))]);
                     var offer = actions != null && row >= 0 && row < actions.Offers.Length ? actions.Offers[row] : null;
@@ -210,7 +212,7 @@ namespace ElectroInventory
                         if (Pressed(Keys.Enter, edges) && offer != null && actions?.Busy == false)
                         { layout.ActionRequested = true; refresh = true; }
                         // Never carry a confirmation to a different row.
-                        if (refresh && items.Count > 0 && row != sample.Rows.IndexOf(items[Math.Min(items.Count - 1, nav.Selected)]))
+                        if (refresh && items.Count > 0 && row != sample.Rows.IndexOf(items[Math.Min(items.Count - 1, Math.Max(0, nav.Selected))]))
                         { selection.Bind(Guid.Empty, null); layout.ActionRequested = false; }
                     }
                     if (layout.ActionRequested)

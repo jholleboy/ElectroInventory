@@ -84,10 +84,10 @@ index 0000000000000000000000000000000000000000..fbe3977a403427a26119bc0d952e5453
 +}
 diff --git a/Los Santos RED/ElectroInventoryActionServer.cs b/Los Santos RED/ElectroInventoryActionServer.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..8c480426685048baace6e9648879f1403b6ea9f9
+index 0000000000000000000000000000000000000000..edb0b45bd012f307edecae65c1f655a4e3a68b4c
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryActionServer.cs	
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,150 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Diagnostics;
@@ -100,7 +100,7 @@ index 0000000000000000000000000000000000000000..8c480426685048baace6e9648879f140
 +{
 +    internal sealed class InventoryActionBinding
 +    {
-+        internal object Identity;
++        internal object Identity, Definition;
 +        internal ActionOffer Offer;
 +        internal Func<ActionCommand, ActionResult> Execute;
 +    }
@@ -220,6 +220,7 @@ index 0000000000000000000000000000000000000000..8c480426685048baace6e9648879f140
 +                var right = other[i];
 +                if (left == null && right == null) continue;
 +                if (left == null || right == null || !ReferenceEquals(left.Identity, right.Identity)
++                    || !ReferenceEquals(left.Definition, right.Definition)
 +                    || left.Offer.Kinds != right.Offer.Kinds || left.Offer.Maximum != right.Offer.Maximum) return false;
 +            }
 +            return true;
@@ -380,10 +381,10 @@ index 0000000000000000000000000000000000000000..840981c46fecb61af1c6df5970601517
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..93a940ebd0eeacb2a113cd084404e2b1d2ef4895
+index 0000000000000000000000000000000000000000..bbef82676d6820289b248ba41ac962d0c5d7acf3
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
-@@ -0,0 +1,278 @@
+@@ -0,0 +1,281 @@
 +using ElectroInventory.Wire;
 +using Rage;
 +using System;
@@ -409,7 +410,7 @@ index 0000000000000000000000000000000000000000..93a940ebd0eeacb2a113cd084404e2b1
 +        private bool disabled;
 +        private readonly ElectroInventoryActionServer actions = new ElectroInventoryActionServer();
 +        private static bool BlocksPersonal(ModController controller) =>
-+            controller.IsDisplayingAlertScreen || VehicleShowcase.ElectroInventoryActive
++            !controller.Player.ActivityManager.CanPerformActivitesBase || controller.IsDisplayingAlertScreen || VehicleShowcase.ElectroInventoryActive
 +            || !controller.Player.IsAliveAndFree || controller.Player.CuffManager.IsHandcuffed
 +            || controller.Player.IsShowingFrontEndMenus || controller.Player.IsDisplayingCustomMenus
 +            || controller.Player.IsShowingActionWheel || controller.Player.CellPhone?.IsActive == true
@@ -445,7 +446,10 @@ index 0000000000000000000000000000000000000000..93a940ebd0eeacb2a113cd084404e2b1
 +                    if (command.Kind != ActionKind.Discard || command.Quantity > item.Amount
 +                        || (command.Quantity != 1 && command.Quantity != item.Amount && !(command.Quantity == 5 && item.Amount > 5)))
 +                        return ActionResult.Rejected;
-+                    return player.ActivityManager.TryElectroInventoryDrop(item.ModItem, command.Quantity)
++                    return player.ActivityManager.TryElectroInventoryDrop(item.ModItem, command.Quantity,
++                        () => SameCharacter(controller, snapshot.Character) && player.IsAliveAndFree
++                            && ReferenceEquals(player.Inventory.Get(item.ModItem), item)
++                            && item.RemainingPercent == row.Quantity)
 +                        ? ActionResult.Started : ActionResult.Rejected;
 +                }
 +            };
@@ -809,7 +813,7 @@ index cb5475209d4b0c4a1ff3d9fd02b2a4c5b6ab3697..e1f92cfae0085dc65c4a76d6ae75ed47
          Player.ActivityManager.IsInteractingWithLocation = false;
          Player.IsTransacting = false;
 diff --git a/Los Santos RED/lsr/Locations/Places/Transaction.cs b/Los Santos RED/lsr/Locations/Places/Transaction.cs
-index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..20241d936ae3f1367016c77c84b4d2fc842e1e4e 100644
+index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..6e4176e829bd8f38763e4a19d767a1d1ec9e4b18 100644
 --- a/Los Santos RED/lsr/Locations/Places/Transaction.cs	
 +++ b/Los Santos RED/lsr/Locations/Places/Transaction.cs	
 @@ -63,8 +63,140 @@ public class Transaction
@@ -854,7 +858,7 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..20241d936ae3f1367016c77c84b4d2fc
 +            return null;
 +        return new LosSantosRED.lsr.InventoryActionBinding
 +        {
-+            Identity = offer,
++            Identity = offer, Definition = item,
 +            Offer = new ElectroInventory.Wire.ActionOffer
 +            {
 +                Token = Guid.NewGuid(), Maximum = maximum,
@@ -980,7 +984,7 @@ index 23e7677e5fecc0b15a4ed3bfcb0414b1d7c5a796..20241d936ae3f1367016c77c84b4d2fc
          SellMenu?.Dispose();
      }
 diff --git a/Los Santos RED/lsr/Player/Activity/ActivityManager.cs b/Los Santos RED/lsr/Player/Activity/ActivityManager.cs
-index 7d53427bf4e4ec2ab95ffb84c9e4bade171bf61a..5ca10dcf1ca61994fdf1dc27ed2f920b204728ce 100644
+index 7d53427bf4e4ec2ab95ffb84c9e4bade171bf61a..9ff6be22f5504919c2f56c5568e6b0603d7dad9c 100644
 --- a/Los Santos RED/lsr/Player/Activity/ActivityManager.cs	
 +++ b/Los Santos RED/lsr/Player/Activity/ActivityManager.cs	
 @@ -731,22 +731,28 @@ public class ActivityManager
@@ -1009,7 +1013,7 @@ index 7d53427bf4e4ec2ab95ffb84c9e4bade171bf61a..5ca10dcf1ca61994fdf1dc27ed2f920b
 +    }
 +    public void DropInventoryItem(ModItem modItem, int amount) => TryElectroInventoryDrop(modItem, amount);
 +
-+    internal bool TryElectroInventoryDrop(ModItem modItem, int amount)
++    internal bool TryElectroInventoryDrop(ModItem modItem, int amount, Func<bool> canCommit = null)
 +    {
 +        if (IsPerformingActivity)
 +        {
@@ -1017,10 +1021,43 @@ index 7d53427bf4e4ec2ab95ffb84c9e4bade171bf61a..5ca10dcf1ca61994fdf1dc27ed2f920b
 +            return false;
          }
 -        modItem.DropItem(Actionable, Settings, amount); 
-+        return modItem.DropItem(Actionable, Settings, amount);
++        return modItem.DropItem(Actionable, Settings, amount, canCommit);
      }
      public void StartScenario()
      {
+diff --git a/Los Santos RED/lsr/Player/Activity/ItemDroppingActivity.cs b/Los Santos RED/lsr/Player/Activity/ItemDroppingActivity.cs
+index f36a5c8fe7320101a3de19a3398ed937986c3bb1..3d01f52e5d4b17adba80352aa37e120046ade8c4 100644
+--- a/Los Santos RED/lsr/Player/Activity/ItemDroppingActivity.cs	
++++ b/Los Santos RED/lsr/Player/Activity/ItemDroppingActivity.cs	
+@@ -18,13 +18,15 @@ namespace LosSantosRED.lsr.Player
+         private string DropItemDictionary;
+         private string DropItemAnimation;
+         private int Amount;
++        private readonly Func<bool> canCommit;
+ 
+-        public ItemDroppingActivity(IActionable player, ISettingsProvideable settings, ModItem modItem, int amount) : base()
++        public ItemDroppingActivity(IActionable player, ISettingsProvideable settings, ModItem modItem, int amount, Func<bool> canCommit = null) : base()
+         {
+             Player = player;
+             Settings = settings;
+             ModItem = modItem;
+             Amount = amount;
++            this.canCommit = canCommit;
+         }
+ 
+         public override ModItem ModItem { get; set; }
+@@ -102,6 +104,11 @@ namespace LosSantosRED.lsr.Player
+             {
+                 return;
+             }
++            if (canCommit != null && !canCommit())
++            {
++                Game.DisplayHelp("Descarte cancelado: inventário ou personagem alterado.");
++                return;
++            }
+             Player.Inventory.Remove(ModItem, Amount);
+             Game.DisplayHelp(LanguageStrings.Translate("activity.discarded", "Discarded {0} ({1})", ModItem.Name, Amount));
+         }
 diff --git a/Los Santos RED/lsr/Player/Interaction/PersonTransaction.cs b/Los Santos RED/lsr/Player/Interaction/PersonTransaction.cs
 index 8500d27e10a3d2800dc9111c68780c2ab99400e6..72eea3022cf64e01876a1a5d07192b2c6dce2ff3 100644
 --- a/Los Santos RED/lsr/Player/Interaction/PersonTransaction.cs	
@@ -1034,7 +1071,7 @@ index 8500d27e10a3d2800dc9111c68780c2ab99400e6..72eea3022cf64e01876a1a5d07192b2c
      public override string DebugString => "";
      public override bool CanPerformActivities { get; set; } = false;
 diff --git a/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs b/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs
-index 8a122346098314ed4dfe74e939c420b1fa320aa3..7472177a9501291f7a4d5bc7cb65d149bb7d4743 100644
+index 8a122346098314ed4dfe74e939c420b1fa320aa3..eb8ff613648e2a60c4069023be187f4792a08d1d 100644
 --- a/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs	
 +++ b/Los Santos RED/lsr/Player/Inventory/Items/ModItem.cs	
 @@ -266,7 +266,7 @@ public class ModItem
@@ -1055,7 +1092,22 @@ index 8a122346098314ed4dfe74e939c420b1fa320aa3..7472177a9501291f7a4d5bc7cb65d149
      {
          int TotalPrice = menuItem.PurchasePrice * TotalItems;
          if (player.BankAccounts.GetMoney(Transaction.UseAccounts) >= TotalPrice || isStealing)
-@@ -578,14 +578,7 @@ public class ModItem
+@@ -530,9 +530,12 @@ public class ModItem
+     {
+         return Name;
+     }
+-    public bool DropItem(IActionable actionable, ISettingsProvideable settings, int amount)
++    public bool DropItem(IActionable actionable, ISettingsProvideable settings, int amount) =>
++        DropItem(actionable, settings, amount, null);
++
++    internal bool DropItem(IActionable actionable, ISettingsProvideable settings, int amount, Func<bool> canCommit)
+     {
+-        ItemDroppingActivity activity = new ItemDroppingActivity(actionable, settings, this, amount);
++        ItemDroppingActivity activity = new ItemDroppingActivity(actionable, settings, this, amount, canCommit);
+         if (activity.CanPerform(actionable))
+         {
+             actionable.ActivityManager.StartUpperBodyActivity(activity);
+@@ -578,14 +581,7 @@ public class ModItem
          takeScroller = new UIMenuNumericScrollerItem<int>(LanguageStrings.Translate("inventory.take", "Take"), "", 1, 1, 1) { Value = 1, Enabled = true, Formatter = v => v.ToString() + " " + GetDisplayMeasurementName() + (v > 1 ? "(s)" : "") };
          takeScroller.Activated += (sender, selectedItem) =>
          {
@@ -1071,7 +1123,7 @@ index 8a122346098314ed4dfe74e939c420b1fa320aa3..7472177a9501291f7a4d5bc7cb65d149
              UpdateInventoryScrollers(player, simpleInventory, settings);
          };
          inventoryItemSubMenu.AddItem(takeScroller);
-@@ -593,14 +586,7 @@ public class ModItem
+@@ -593,14 +589,7 @@ public class ModItem
          giveScroller = new UIMenuNumericScrollerItem<int>(LanguageStrings.Translate("inventory.deposit", "Deposit"), "", 1, 1, 1) { Value = 1, Enabled = true, Formatter = v => v.ToString() + " " + GetDisplayMeasurementName() + (v > 1 ? "(s)" : "") };
          giveScroller.Activated += (sender, selectedItem) =>
          {
@@ -1087,7 +1139,7 @@ index 8a122346098314ed4dfe74e939c420b1fa320aa3..7472177a9501291f7a4d5bc7cb65d149
              UpdateInventoryScrollers(player, simpleInventory, settings);
          };
          inventoryItemSubMenu.AddItem(giveScroller);
-@@ -616,6 +602,17 @@ public class ModItem
+@@ -616,6 +605,17 @@ public class ModItem
  
          UpdateInventoryScrollers(player, simpleInventory, settings);
      }

@@ -21,6 +21,7 @@ namespace ElectroInventory
         public const int Width = 1400, Height = 760, Page = 12;
         private static readonly Color Cyan = Color.FromArgb(87, 229, 243), Pink = Color.FromArgb(247, 137, 213);
         private static readonly Color Ink = Color.FromArgb(231, 245, 250), Muted = Color.FromArgb(157, 177, 194);
+        private static readonly Color CardSelected = Color.FromArgb(23, 54, 68);
         private static readonly Color Card = Color.FromArgb(19, 36, 53), Edge = Color.FromArgb(49, 76, 94);
         public readonly List<Tuple<Rectangle, Action>> Targets = new List<Tuple<Rectangle, Action>>();
 
@@ -113,10 +114,11 @@ namespace ElectroInventory
                 Entry row = rows[index];
                 var card = new Rectangle(bounds.X + 12 + (i % columns) * width, bounds.Y + 48 + (i / columns) * 92, width - 6, 84);
                 bool selected = nav.Right == right && nav.Selected == index;
-                Box(g, card, Card, selected ? Cyan : Edge);
+                Box(g, card, selected ? CardSelected : Card, selected ? Cyan : Edge);
+                if (selected) Line(g, card.Left + 2, card.Bottom - 3, card.Right - 3, card.Bottom - 3, Pink);
                 Text(g, Glyph(row), card.X + 7, card.Y + 7, 34, 25, 20, selected ? Pink : Cyan, true);
                 Text(g, row.Name, card.X + 7, card.Y + 35, card.Width - 14, 27, 16, Ink, true);
-                Text(g, Summary(row), card.X + 7, card.Bottom - 22, card.Width - 14, 20, 14, Muted, false);
+                Text(g, Summary(row), card.X + 7, card.Bottom - 22, card.Width - 14, 20, 14, selected ? Ink : Muted, false);
                 if (!passive) Targets.Add(Tuple.Create(card, (Action)(() => { nav.Right = right; nav.Selected = index; nav.Search = false; })));
             }
             Text(g, rows.Count == 0 ? "0 entradas" : $"{offset + 1}–{Math.Min(rows.Count, offset + Page)} / {rows.Count}",
