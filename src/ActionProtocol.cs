@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO.MemoryMappedFiles;
 using System.Threading;
 
@@ -32,6 +33,22 @@ namespace ElectroInventory.Wire
 
         public static bool OwnsPool(bool lease, object registered, object candidate) =>
             lease && registered != null && ReferenceEquals(registered, candidate);
+
+        public static bool VisibleMenuTree<T>(T root, Func<T, bool> visible, Func<T, IEnumerable<T>> children) where T : class
+        {
+            if (root == null) return false;
+            var visited = new HashSet<T>();
+            var remaining = new Stack<T>();
+            remaining.Push(root);
+            while (remaining.Count > 0)
+            {
+                var menu = remaining.Pop();
+                if (menu == null || !visited.Add(menu)) continue;
+                if (visible(menu)) return true;
+                foreach (var child in children(menu)) remaining.Push(child);
+            }
+            return false;
+        }
 
         public static bool HasFocus(Guid session, Guid grant, long expires, long now, long margin = 0) =>
             session != Guid.Empty && session == grant && expires > now && expires - now > margin;

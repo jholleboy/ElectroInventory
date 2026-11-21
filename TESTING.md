@@ -66,3 +66,11 @@ A suíte de console cobre concessão e expiração, cliques em alvos, fechamento
 2. Abra comércio e armazenamento pelo jogo e pressione F10. Confira que o menu nativo e seu banner somem apenas com concessão válida. Feche com F10 ou Esc e confira retorno ao mesmo menu e seleção. Teste descarregamento, perda de acesso, troca de personagem e fechamento externo.
 3. Compare as grades e o cursor em 1080p e ultrawide. Navegue por filtros, busca, paginação, mouse, teclado e troca de lado. Confirme ícones padrão com pasta de imagens ausente e com arquivo inválido.
 4. Em armazenamento, compare antes e depois nos dois lados, inclusive pilha fracionária. Em comércio genérico, compare preço, quantidade, total, saldo e atualização de ambas as abas após compra e venda. Tente clique duplo e cotação vencida. Repita em contextos passivos e especializados.
+
+## Rodada integrada V3.1
+
+Em save de teste e com ElectroHud V6, use F10 com NPC de compra/venda e com NPC que só compra do jogador. Confirme a mensagem e continuidade do menu original. Depois teste o caminho comercial de estabelecimento, incluindo The Families Den se disponível.
+
+No veículo, entre em Armazenamento pelo LS RED, tanto na raiz quanto nos detalhes de um item. Use setas, Enter, mouse, Esc e gamepad. O pool original não deve navegar nem aparecer durante a concessão e deve voltar no mesmo submenu ao fechar. Confira outro menu independente após devolver o foco. Teste perda de proximidade, movimento do carro e mudança de personagem.
+
+Fora e dentro do veículo, guarde e retire unidades inteiras, inclusive de uma pilha parcialmente consumida. Compare os dois lados. Interrompa a animação após a confirmação e compare de novo. Repita com uma pilha abaixo de uma unidade, item bloqueado, clique duplo e troca de veículo durante a confirmação. Confira que armas e dinheiro continuam sob o menu original. Os testes de console exercitam as regras de árvore/pool, abas sem oferta executável, validação inteira e expiração, sem rodar a lógica nativa de GTA V.

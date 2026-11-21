@@ -1,10 +1,11 @@
 diff --git a/Los Santos RED/ElectroInventoryActionProtocol.cs b/Los Santos RED/ElectroInventoryActionProtocol.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..10c0c17fd8fbb81f775e47d0c058b35c025fee96
+index 0000000000000000000000000000000000000000..fba0c26593bc6b0807f92d794c49d9ff88da392d
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryActionProtocol.cs	
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,109 @@
 +using System;
++using System.Collections.Generic;
 +using System.IO.MemoryMappedFiles;
 +using System.Threading;
 +
@@ -38,6 +39,22 @@ index 0000000000000000000000000000000000000000..10c0c17fd8fbb81f775e47d0c058b35c
 +
 +        public static bool OwnsPool(bool lease, object registered, object candidate) =>
 +            lease && registered != null && ReferenceEquals(registered, candidate);
++
++        public static bool VisibleMenuTree<T>(T root, Func<T, bool> visible, Func<T, IEnumerable<T>> children) where T : class
++        {
++            if (root == null) return false;
++            var visited = new HashSet<T>();
++            var remaining = new Stack<T>();
++            remaining.Push(root);
++            while (remaining.Count > 0)
++            {
++                var menu = remaining.Pop();
++                if (menu == null || !visited.Add(menu)) continue;
++                if (visible(menu)) return true;
++                foreach (var child in children(menu)) remaining.Push(child);
++            }
++            return false;
++        }
 +
 +        public static bool HasFocus(Guid session, Guid grant, long expires, long now, long margin = 0) =>
 +            session != Guid.Empty && session == grant && expires > now && expires - now > margin;
@@ -424,7 +441,7 @@ index 0000000000000000000000000000000000000000..0af08027e3e9c38830b3d850e2708d9c
 +}
 diff --git a/Los Santos RED/ElectroInventoryPublisher.cs b/Los Santos RED/ElectroInventoryPublisher.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..87878c603fcf18553ca45c06d7b4c5d2ae1c38a7
+index 0000000000000000000000000000000000000000..a717bdbd279e83001c33a2f44ebb4d01e897fbfb
 --- /dev/null
 +++ b/Los Santos RED/ElectroInventoryPublisher.cs	
 @@ -0,0 +1,352 @@
@@ -518,7 +535,7 @@ index 0000000000000000000000000000000000000000..87878c603fcf18553ca45c06d7b4c5d2
 +
 +        internal static void Track(object key, RAGENativeUI.MenuPool pool, Func<bool> isValid, Action<Snapshot> populate)
 +        {
-+            if (!ReferenceEquals(owner, key)) contextSession = Guid.NewGuid();
++            if (!ReferenceEquals(owner, key) || !ReferenceEquals(focusPool, pool)) contextSession = Guid.NewGuid();
 +            owner = key;
 +            focusPool = pool;
 +            valid = isValid;
@@ -853,7 +870,7 @@ index 020d96832cdda2e97ca2a4e971d292bb22ef0454..4c91f9749153a37d952294b9608c3561
                  new ModTaskGroup("RG3:World Gen", new List<ModTask>()//something in here is causing a hang on some crapola computers
                  {
 diff --git a/Los Santos RED/lsr/Inventory/CashStorage.cs b/Los Santos RED/lsr/Inventory/CashStorage.cs
-index 929e8f36477b97664f5e63a430ddca1e9a507717..f644fd0a655acf3683212ad02df9df1bc75f2d7c 100644
+index 929e8f36477b97664f5e63a430ddca1e9a507717..4f24d36e9c1174f8efe5d01959220c6db8c70a74 100644
 --- a/Los Santos RED/lsr/Inventory/CashStorage.cs	
 +++ b/Los Santos RED/lsr/Inventory/CashStorage.cs	
 @@ -19,6 +19,7 @@ public class CashStorage
@@ -864,61 +881,6 @@ index 929e8f36477b97664f5e63a430ddca1e9a507717..f644fd0a655acf3683212ad02df9df1b
      private GameLocation GameLocation;
      private uint NotificationHandle;
      private UIMenuItem cashStorageSubMenuItem;
-@@ -35,12 +36,15 @@ public class CashStorage
-         StoredCash = 0;
-     }
- 
-+    internal UIMenu ElectroInventoryMenu { get; private set; }
-+
-     public void CreateInteractionMenu(IInteractionable player, MenuPool MenuPool, UIMenu InteractionMenu, GameLocation gameLocation, bool withAnimation, bool removeBanner)//, IMessageDisplayable messageDisplayable)
-     {
-         Player = player;
-         GameLocation = gameLocation;
-         WithAnimation = withAnimation;
-         cashStorageSubMenu = MenuPool.AddSubMenu(InteractionMenu, LanguageStrings.Translate("storage.cash.title", "Stored Cash"));
-+        ElectroInventoryMenu = cashStorageSubMenu;
-         cashStorageSubMenuItem = InteractionMenu.MenuItems[InteractionMenu.MenuItems.Count() - 1];
-         cashStorageSubMenuItem.Description = LanguageStrings.Translate("storage.cash.manage", "Manage stored cash.");
-         if (removeBanner)
-diff --git a/Los Santos RED/lsr/Inventory/SimpleInventory.cs b/Los Santos RED/lsr/Inventory/SimpleInventory.cs
-index 0c46be0e1a643bbf8f6154267838787f2d3cb855..ccd4df3576fd4a47f50582c639151c541b8e22f8 100644
---- a/Los Santos RED/lsr/Inventory/SimpleInventory.cs	
-+++ b/Los Santos RED/lsr/Inventory/SimpleInventory.cs	
-@@ -92,6 +92,8 @@ public class SimpleInventory
-             }
-         }
-     }
-+    internal UIMenu ElectroInventoryMenu { get; private set; }
-+
-     public void CreateInteractionMenu(IInteractionable player, MenuPool menuPool, UIMenu menuToAdd, bool withAnimations, List<ItemType> AllowedItemTypes, List<ItemType> DisallowedItemTypes, bool removeBanner, string overrideTitle, string overrideDescription)
-     {
-         string title = "Stored Inventory";
-@@ -108,6 +110,7 @@ public class SimpleInventory
-         }
- 
-         UIMenu VehicleInventoryItem = menuPool.AddSubMenu(menuToAdd, title);
-+        ElectroInventoryMenu = VehicleInventoryItem;
-         menuToAdd.MenuItems[menuToAdd.MenuItems.Count() - 1].Description = description;
-         if (removeBanner)
-         {
-diff --git a/Los Santos RED/lsr/Inventory/WeaponStorage.cs b/Los Santos RED/lsr/Inventory/WeaponStorage.cs
-index 9c4fed33ae3f2b21b57f1655f1d85a5b2ce55740..7ca80677550575c32e3627c14a9de5df32cdcb1d 100644
---- a/Los Santos RED/lsr/Inventory/WeaponStorage.cs	
-+++ b/Los Santos RED/lsr/Inventory/WeaponStorage.cs	
-@@ -67,10 +67,13 @@ public class WeaponStorage
-         StoredWeapons.Remove(storedWeapon);
-         storedWeapon.GiveToPlayer(Weapons);
-     }
-+    internal UIMenu ElectroInventoryMenu { get; private set; }
-+
-     public void CreateInteractionMenu(IInteractionable player, MenuPool menuPool, UIMenu menuToAdd, IWeapons weapons, IModItems modItems, bool withAnimations, bool removeBanner)
-     {
-         Weapons = weapons;
-         UIMenu WeaponsHeaderMenu = menuPool.AddSubMenu(menuToAdd, LanguageStrings.Translate("storage.weapons.title", "Stored Weapons"));
-+        ElectroInventoryMenu = WeaponsHeaderMenu;
-         menuToAdd.MenuItems[menuToAdd.MenuItems.Count() - 1].Description = LanguageStrings.Translate("storage.weapons.manage", "Manage Stored Weapons. Place items within storage, or retrieve them for use.");
-         if (removeBanner)
-         {
 diff --git a/Los Santos RED/lsr/Locations/Places/GameLocation.cs b/Los Santos RED/lsr/Locations/Places/GameLocation.cs
 index 1161d559b005ff77b681f1de60798fe8a755bef4..2658dc3e6ca85b761ac15b8bea14f7657cf094dd 100644
 --- a/Los Santos RED/lsr/Locations/Places/GameLocation.cs	
@@ -1483,20 +1445,19 @@ index b3d345d2104b76142a24b51de9831e8c17672a3a..8cc785caea17d3202b8a5a927f60a1d9
  }
  
 diff --git a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs b/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs
-index 54b02a3921fdb496fc53e4af41312ac6a784d07e..86aec7d94095c73b45f476941e095e0e7683555d 100644
+index 54b02a3921fdb496fc53e4af41312ac6a784d07e..729e4fcf394ac982563c2ac49585f8e1bc569c86 100644
 --- a/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs	
 +++ b/Los Santos RED/lsr/Vehicle/Menu/VehicleInteractionMenu.cs	
-@@ -17,6 +17,9 @@ public class VehicleInteractionMenu
+@@ -17,6 +17,8 @@ public class VehicleInteractionMenu
      protected VehicleDoorSeatData VehicleDoorSeatData;
      protected IInteractionable Player;
      public bool IsShowingMenu { get; set; } = false;
 +    private UIMenu electroInventoryStorageMenu;
-+    private UIMenu electroInventoryItems, electroInventoryWeapons, electroInventoryCash;
 +    private bool electroInventoryWithAnimations;
      public VehicleInteractionMenu(VehicleExt vehicleExt)
      {
          VehicleExt = vehicleExt;
-@@ -39,6 +42,7 @@ public class VehicleInteractionMenu
+@@ -39,6 +41,7 @@ public class VehicleInteractionMenu
          }
          UIMenu InventoryWeaponHeaderMenu = MenuPool.AddSubMenu(VehicleInteractMenu, LanguageStrings.Translate("vehicle.storage", "Inventory, Cash, and Weapons"));
          VehicleInteractMenu.MenuItems[VehicleInteractMenu.MenuItems.Count() - 1].Description = LanguageStrings.Translate("vehicle.storage.description", "Manage Stored Inventory, Cash, and Weapons. Place items, cash, or weapons within storage, or retrieve them for use.");
@@ -1504,7 +1465,7 @@ index 54b02a3921fdb496fc53e4af41312ac6a784d07e..86aec7d94095c73b45f476941e095e0e
          InventoryWeaponHeaderMenu.SetBannerType(EntryPoint.LSRedColor);
          InventoryWeaponHeaderMenu.OnMenuOpen += (sender) =>
          {
-@@ -78,11 +82,15 @@ public class VehicleInteractionMenu
+@@ -78,7 +81,8 @@ public class VehicleInteractionMenu
          VehicleExt.HandleRandomItems(modItems);
          VehicleExt.HandleRandomWeapons(modItems, weapons);
          VehicleExt.HandleRandomCash();
@@ -1514,20 +1475,13 @@ index 54b02a3921fdb496fc53e4af41312ac6a784d07e..86aec7d94095c73b45f476941e095e0e
          VehicleExt.WeaponStorage.CreateInteractionMenu(player, MenuPool, InventoryWeaponHeaderMenu, weapons, modItems, !player.IsInVehicle, false);
          VehicleExt.CashStorage.CreateInteractionMenu(player, MenuPool, InventoryWeaponHeaderMenu, null, !player.IsInVehicle, false);
  
- 
-+        electroInventoryItems = VehicleExt.SimpleInventory.ElectroInventoryMenu;
-+        electroInventoryWeapons = VehicleExt.WeaponStorage.ElectroInventoryMenu;
-+        electroInventoryCash = VehicleExt.CashStorage.ElectroInventoryMenu;
-         VehicleInteractMenu.Visible = true;
-         IsShowingMenu = true;
-         Player.ButtonPrompts.RemovePrompts("VehicleInteract");
-@@ -95,6 +103,18 @@ public class VehicleInteractionMenu
+@@ -95,6 +99,18 @@ public class VehicleInteractionMenu
          VehicleInteractMenu.SetBannerType(EntryPoint.LSRedColor);
          MenuPool.Add(VehicleInteractMenu);     
      }
 +    private bool IsElectroInventoryStorageVisible() =>
-+        (electroInventoryStorageMenu?.Visible == true || electroInventoryItems?.Visible == true
-+            || electroInventoryWeapons?.Visible == true || electroInventoryCash?.Visible == true)
++        ElectroInventory.Wire.ActionProtocol.VisibleMenuTree(electroInventoryStorageMenu,
++            menu => menu.Visible, menu => menu.Children.Values)
 +        && Player.IsAliveAndFree
 +        && VehicleExt.Vehicle.Exists() && VehicleExt.Vehicle.Speed <= 0.5f
 +        && VehicleExt.Vehicle.DistanceTo2D(Game.LocalPlayer.Character) <= 7f
@@ -1540,7 +1494,7 @@ index 54b02a3921fdb496fc53e4af41312ac6a784d07e..86aec7d94095c73b45f476941e095e0e
      protected virtual void ProcessMenu()
      {
          GameFiber.StartNew(delegate
-@@ -103,6 +123,10 @@ public class VehicleInteractionMenu
+@@ -103,6 +119,10 @@ public class VehicleInteractionMenu
              {
                  while (EntryPoint.ModController.IsRunning && Player.IsAliveAndFree && MenuPool.IsAnyMenuOpen() && VehicleExt.Vehicle.Exists() && VehicleExt.Vehicle.Speed <= 0.5f && VehicleExt.Vehicle.DistanceTo2D(Game.LocalPlayer.Character) <= 7f)
                  {
@@ -1551,7 +1505,7 @@ index 54b02a3921fdb496fc53e4af41312ac6a784d07e..86aec7d94095c73b45f476941e095e0e
                      global::UI.ProcessLocalizedMenus(MenuPool);
                      GameFiber.Yield();
                  }
-@@ -110,6 +134,7 @@ public class VehicleInteractionMenu
+@@ -110,6 +130,7 @@ public class VehicleInteractionMenu
                  //{
                  //    Player.ActivityManager.SetDoor(VehicleDoorSeatData.DoorID, true, false);
                  //}

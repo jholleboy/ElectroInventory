@@ -140,7 +140,7 @@ namespace ElectroInventory
                     open = false;
                     ReleaseTexture();
                 }
-                bool nativeTrade = sample?.Mode == 2 && actions?.NativeTradeOnly == true;
+                bool nativeTrade = sample?.Mode == 2 && actions?.NativeTradeOnly(sample.PublicationStamp) == true;
                 if (nativeTrade && (open || inspectPressed))
                 {
                     if (open) { open = false; ReleaseTexture(); }

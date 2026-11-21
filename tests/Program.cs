@@ -14,6 +14,7 @@ internal static class Program
     private static void Main()
     {
         CheckOverlayInput();
+        CheckV31();
         CheckV3();
         CheckFocusAndClicks();
         CheckActions();
@@ -225,6 +226,62 @@ internal static class Program
         Require(ActionProtocol.ExactTransfer(5.25f, 2.5f, 3));
         Require(!ActionProtocol.ExactTransfer(2.25f, 2.5f, 3));
         Console.WriteLine("V3: sessões, F10/Esc, personagem, diferentes proporções e totais passaram.");
+    }
+
+    private sealed class MenuNode
+    {
+        internal bool Visible;
+        internal readonly System.Collections.Generic.List<MenuNode> Children = new System.Collections.Generic.List<MenuNode>();
+    }
+
+    private static void CheckV31()
+    {
+        var nativePool = new object();
+        var unrelatedPool = new object();
+        Require(ActionProtocol.OwnsPool(true, nativePool, nativePool));
+        Require(!ActionProtocol.OwnsPool(true, nativePool, unrelatedPool));
+        Require(!ActionProtocol.OwnsPool(false, nativePool, nativePool));
+        var root = new MenuNode();
+        var child = new MenuNode();
+        var detail = new MenuNode();
+        root.Children.Add(child);
+        child.Children.Add(detail);
+        root.Visible = true;
+        Require(ActionProtocol.VisibleMenuTree(root, menu => menu.Visible, menu => menu.Children));
+        root.Visible = false;
+        detail.Visible = true;
+        Require(ActionProtocol.VisibleMenuTree(root, menu => menu.Visible, menu => menu.Children));
+        detail.Visible = false;
+        Require(!ActionProtocol.VisibleMenuTree(root, menu => menu.Visible, menu => menu.Children));
+
+        var session = Guid.NewGuid();
+        var snapshot = new Snapshot { Mode = 2, Character = 27, Session = session };
+        var buy = new Entry { Group = 4, Price = 12 };
+        var sell = new Entry { Group = 5, Price = 8 };
+        snapshot.Rows.Add(buy);
+        snapshot.Rows.Add(sell);
+        var tabs = new ElectroInventory.TradeTabs();
+        tabs.Open(snapshot);
+        Require(tabs.Toggle(snapshot) && tabs.Current == 5);
+        Require(!ElectroInventory.TradeTabs.CanAct(buy, null) && !ElectroInventory.TradeTabs.CanAct(sell, null));
+        snapshot.Rows.Remove(buy);
+        tabs.Open(snapshot);
+        Require(tabs.Current == 5 && !tabs.Toggle(snapshot));
+
+        var revision = Guid.NewGuid();
+        foreach (var direction in new[] { ActionKind.Deposit, ActionKind.Take })
+        {
+            var offer = new ActionOffer { Kinds = direction, Maximum = 2, Token = Guid.NewGuid() };
+            var command = new ActionCommand { Id = Guid.NewGuid(), Kind = direction, Quantity = 1,
+                Session = session, Revision = revision, Token = offer.Token };
+            Require(ActionProtocol.Authorize(command, session, revision, offer));
+            Require(ActionProtocol.ExactTransfer(2.5f, 1, command.Quantity));
+            Require(!ActionProtocol.ExactTransfer(.5f, 1, command.Quantity));
+            Require(!ActionProtocol.Authorize(command, session, revision, null)); // item blocked
+            Require(!ActionProtocol.Authorize(command, Guid.Empty, revision, offer)); // vehicle left context
+            Require(!ActionProtocol.Authorize(command, session, Guid.NewGuid(), offer)); // replay
+        }
+        Console.WriteLine("V3.1: árvore nativa, pool, NPC somente leitura, Guardar/Retirar e invalidação passaram.");
     }
 
     private static void CheckOverlayInput()

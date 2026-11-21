@@ -18,7 +18,8 @@ namespace ElectroInventory
         private Guid pending;
         public Guid Revision { get; private set; }
         public ActionOffer[] Offers { get; private set; } = new ActionOffer[0];
-        public bool NativeTradeOnly { get; private set; }
+        private long nativeTradeStamp;
+        public bool NativeTradeOnly(long stamp) => stamp > 0 && nativeTradeStamp == stamp;
         public bool Busy => pending != Guid.Empty;
         public ActionResult Result { get; private set; }
 
@@ -59,7 +60,7 @@ namespace ElectroInventory
                         Offers = new ActionOffer[0];
                         return;
                     }
-                    NativeTradeOnly = view.ReadInt32(ActionProtocol.FocusPolicy) == 2;
+                    nativeTradeStamp = view.ReadInt32(ActionProtocol.FocusPolicy) == 2 ? stamp : 0;
                     Guid revision = ActionProtocol.ReadGuid(view, 16);
                     if (revision == Revision) return;
                     int count = view.ReadInt32(32);
@@ -141,7 +142,7 @@ namespace ElectroInventory
             view = null; map = null; mutex = null;
             Revision = pending = Guid.Empty;
             Offers = new ActionOffer[0];
-            NativeTradeOnly = false;
+            nativeTradeStamp = 0;
         }
     }
 }
